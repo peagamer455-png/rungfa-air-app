@@ -76,14 +76,14 @@
 
     // บันทึก/แก้ไขข้อมูล (เพิ่มที่เก็บสินค้าได้เลย)
     const generateAutoBarcode = (currentProducts) => {
-      if (!currentProducts || currentProducts.length === 0) return "1001";
+      if (!currentProducts || currentProducts.length === 0) return "1";
 
       // ดึงเลขบาร์โค้ดทั้งหมดที่มีอยู่ในร้านมาเฉพาะที่เป็นตัวเลข
       const existingNumbers = currentProducts
         .map(p => parseInt(p.barcode))
         .filter(num => !isNaN(num));
 
-      if (existingNumbers.length === 0) return "1001";
+      if (existingNumbers.length === 0) return "1";
 
       // หาเลขที่มากที่สุด แล้วบวกไปอีก 1
       const maxNumber = Math.max(...existingNumbers);
