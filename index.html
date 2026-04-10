@@ -1,0 +1,3676 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>รุ่งฟ้าแอร์ SHOP - ระบบจัดการบิลสำเร็จรูป</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            green: {
+              50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac', 400: '#4ade80',
+              500: '#22c55e', 600: '#16a34a', 700: '#15803d', 800: '#166534', 900: '#14532d'
+            }
+          },
+          fontFamily: {
+            inter: ['Inter', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+</head>
+
+<body class="bg-gray-50">
+  <div id="root">
+  </div>
+
+  <script type="text/babel">
+    // *** โค้ด React/JSX/JS ทั้งหมดจาก App.jsx อยู่ด้านล่างนี้ ***
+
+    const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+    // --- 1. Firebase Configuration & Helpers ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDHXicnk7hX0W2NjQeq8JuQqKMYk9PgI8M",
+      authDomain: "rungfaairshop.firebaseapp.com",
+      projectId: "rungfaairshop",
+      storageBucket: "rungfaairshop.firebasestorage.app",
+      messagingSenderId: "345626163320",
+      appId: "1:345626163320:web:c41442f08ff7683c91158d",
+      measurementId: "G-ZQM08BTWJ9"
+    };
+
+    // เชื่อมต่อ Cloud
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
+
+    const PRODUCT_STORE = 'products';
+    const BILL_STORE = 'bills';
+
+    // ดึงข้อมูลแบบ Real-time (เครื่องอื่นแก้ เครื่องเราเปลี่ยนทันที)
+    const subscribeData = (storeName, callback) => {
+      return db.collection(storeName).onSnapshot((snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        callback(data);
+      });
+    };
+
+    // บันทึก/แก้ไขข้อมูล (เพิ่มที่เก็บสินค้าได้เลย)
+    const generateAutoBarcode = (currentProducts) => {
+      if (!currentProducts || currentProducts.length === 0) return "1001";
+
+      // ดึงเลขบาร์โค้ดทั้งหมดที่มีอยู่ในร้านมาเฉพาะที่เป็นตัวเลข
+      const existingNumbers = currentProducts
+        .map(p => parseInt(p.barcode))
+        .filter(num => !isNaN(num));
+
+      if (existingNumbers.length === 0) return "1001";
+
+      // หาเลขที่มากที่สุด แล้วบวกไปอีก 1
+      const maxNumber = Math.max(...existingNumbers);
+      return String(maxNumber + 1);
+    };
+    const putData = async (storeName, data, allProducts = []) => {
+      const dataToSave = { ...data };
+      if (storeName === PRODUCT_STORE) {
+        // ถ้าไม่มี ID (คือเพิ่มใหม่) และ บาร์โค้ดว่าง
+        if (!dataToSave.id && (!dataToSave.barcode || dataToSave.barcode.trim() === "")) {
+          // ใช้ logic เดิมที่นายต้องการ: หาตัวเลขที่มากที่สุดแล้ว + 1
+          const numericBarcodes = allProducts
+            .map(p => parseInt(p.barcode))
+            .filter(b => !isNaN(b));  
+
+            const maxBarcode = numericBarcodes.length > 0 ? Math.max(...numericBarcodes) : 1000;
+          dataToSave.barcode = String(maxBarcode + 1);
+        }
+      }
+      Object.keys(dataToSave).forEach(key => {
+        if (dataToSave[key] === undefined || dataToSave[key] === null) {
+          dataToSave[key] = (key === 'stock' || key === 'price' || key === 'cost') ? 0 : "";
+        }
+      });
+      const id = dataToSave.id ? String(dataToSave.id) : null;
+      delete dataToSave.id;
+
+      if (id) {
+        await db.collection(storeName).doc(id).set(dataToSave, { merge: true });
+        return id;
+      } else {
+        const docRef = await db.collection(storeName).add(dataToSave);
+        return docRef.id;
+      }
+    };
+
+    const deleteData = async (storeName, id) => {
+      await db.collection(storeName).doc(String(id)).delete();
+      return true;
+    };
+
+    // --- 2. jsPDF & autoTable CDN Loading ---
+    const loadPdfLibs = () => {
+      return new Promise((resolve, reject) => {
+        // ถ้ามี jsPDF แล้วก็จบเลย (แต่ยังต้องเช็ค autoTable ต่อไป)
+        if (window.jspdf && window.jspdf.jsPDF && typeof window.jspdf.jsPDF === 'function') {
+          // ถ้า autoTable ยังไม่มี ให้พยายามโหลดปลั๊กอินต่อ
+          if (typeof window.jspdf.jsPDF.prototype.autoTable === 'function' || typeof window.jspdf.jsPDF().autoTable === 'function') {
+            resolve();
+            return;
+          }
+        }
+
+        const loadScript = (src) => new Promise((res, rej) => {
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = () => res();
+          s.onerror = (e) => rej(e);
+          document.head.appendChild(s);
+        });
+
+        const jspdfUrl = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+        // ลงเวอร์ชัน autotable ที่เข้ากันได้กับ jspdf 2.x
+        const autotableUrl = "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js";
+
+        // โหลดแบบเรียงลำดับ: jsPDF ก่อน แล้วค่อยโหลด autoTable
+        loadScript(jspdfUrl)
+          .then(() => loadScript(autotableUrl))
+          .then(() => {
+            // ยืนยันว่าฟังก์ชัน autoTable ถูกผูกกับ instance
+            try {
+              const jsPDF = window.jspdf && window.jspdf.jsPDF;
+              const docTest = jsPDF ? new jsPDF() : null;
+              if (docTest && typeof docTest.autoTable === 'function') {
+                console.log('jsPDF and autoTable loaded.');
+                resolve();
+              } else {
+                // บาง CDN/เวอร์ชันอาจผูกแตกต่างกัน แต่ยังคงใช้งานได้บน doc.autoTable หลังจากสร้าง instance
+                console.warn('jsPDF loaded but autoTable not detected on instance yet. Proceeding anyway.');
+                resolve();
+              }
+            } catch (err) {
+              console.warn('pdf libs loaded but check failed, proceeding:', err);
+              resolve();
+            }
+          })
+          .catch(err => {
+            console.error('Failed to load PDF libraries:', err);
+            reject(err);
+          });
+      });
+    };
+
+
+    // --- 3. Utility Functions ---
+    const formatCurrency = (amount) => {
+      return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', minimumFractionDigits: 2 }).format(amount);
+    };
+
+    const formatDate = (dateString) => {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('th-TH', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+      }) + ' ' + date.toLocaleTimeString('th-TH', {
+        hour: '2-digit', minute: '2-digit'
+      });
+    };
+
+    // [NEW] ฟังก์ชันสำหรับแสดงวันที่ปัจจุบันในรูปแบบภาษาไทยที่สวยงาม
+    const formatThaiDate = () => {
+      const date = new Date();
+      // เช่น "วันศุกร์ที่ 25 ตุลาคม 2568"
+      return date.toLocaleDateString('th-TH', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+    };
+
+    // --- 3.1 Store Overview Dashboard (เวอร์ชันแก้ไข Syntax และบีบแกน Y) ---
+    const OverviewDashboard = ({ bills, formatCurrency, openPasswordModal, setCurrentPage }) => {
+      const [timeRange, setTimeRange] = useState('month');
+      const [isAuthorized, setIsAuthorized] = useState(false);
+      const hasOpenedModal = useRef(false);
+
+      useEffect(() => {
+        if (!isAuthorized && !hasOpenedModal.current) {
+          hasOpenedModal.current = true;
+          openPasswordModal(() => setIsAuthorized(true), () => setCurrentPage('dashboard'));
+        }
+      }, [isAuthorized, openPasswordModal, setCurrentPage]);
+
+      const stats = useMemo(() => {
+        if (!isAuthorized) return null;
+
+        const now = new Date();
+        let labels = [];
+        let chartData = [];
+        let filteredBills = [];
+
+        const getStatsForRange = (filterFn, labelArray) => {
+          labels = labelArray;
+          chartData = labelArray.map((_, i) => {
+            const matches = bills.filter(b => filterFn(b, i));
+            return {
+              // ดักค่า NaN ด้วย Number() || 0
+              profit: matches.reduce((sum, b) => {
+                const s = Number(b.totalSale) || 0;
+                const c = Number(b.totalCost) || 0;
+                return sum + (s - c);
+              }, 0),
+              sale: matches.reduce((sum, b) => sum + (Number(b.totalSale) || 0), 0)
+            };
+          });
+          filteredBills = bills.filter(b => labelArray.some((_, i) => filterFn(b, i)));
+        };
+
+        // --- ส่วนการเช็ค TimeRange (คงเดิม) ---
+        if (timeRange === 'week') {
+          const days = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+          const startOfWeek = new Date(now);
+          startOfWeek.setDate(now.getDate() - now.getDay());
+          startOfWeek.setHours(0, 0, 0, 0);
+          getStatsForRange((b, i) => {
+            const d = new Date(b.date);
+            return d >= startOfWeek && d.getDay() === i;
+          }, days);
+        } else if (timeRange === 'month') {
+          const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+          const dayLabels = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+          getStatsForRange((b, i) => {
+            const d = new Date(b.date);
+            return d.getDate() === (i + 1) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+          }, dayLabels);
+        } else if (timeRange === 'quarter') {
+          getStatsForRange((b, i) => {
+            const d = new Date(b.date);
+            return Math.floor(d.getMonth() / 3) === i && d.getFullYear() === now.getFullYear();
+          }, ['Q1', 'Q2', 'Q3', 'Q4']);
+        } else if (timeRange === 'year_months') {
+          const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+          getStatsForRange((b, i) => {
+            const d = new Date(b.date);
+            return d.getMonth() === i && d.getFullYear() === now.getFullYear();
+          }, months);
+        } else {
+          const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - 4 + i);
+          getStatsForRange((b, i) => new Date(b.date).getFullYear() === years[i], years.map(y => y + 543));
+        }
+
+        const productMap = {};
+        filteredBills.forEach(b => {
+          (b.items || []).forEach(item => {
+            const name = item.name || "ทั่วไป";
+            const qty = parseFloat(item.quantity) || parseFloat(item.qty) || 0;
+            const price = parseFloat(item.price) || 0;
+            const cost = parseFloat(item.cost) || 0;
+            if (!productMap[name]) productMap[name] = { name, qty: 0, profit: 0 };
+            productMap[name].qty += qty;
+            productMap[name].profit += (price - cost) * qty;
+          });
+        });
+
+        const productList = Object.values(productMap);
+        const maxProfit = Math.max(...chartData.map(d => d.profit), 100);
+
+        return {
+          totalSale: filteredBills.reduce((sum, b) => sum + (Number(b.totalSale) || 0), 0),
+          // แก้ไขจุดที่ 1: เปลี่ยนชื่อจาก netProfit เป็น totalProfit ให้ตรงกับที่เรียกใช้ข้างล่าง
+          totalProfit: filteredBills.reduce((sum, b) => {
+            const s = Number(b.totalSale) || 0;
+            const c = Number(b.totalCost) || 0;
+            return sum + (s - c);
+          }, 0),
+          totalBills: filteredBills.length,
+          labels,
+          chartData,
+          topQty: productList.sort((a, b) => b.qty - a.qty).slice(0, 5),
+          topProfit: productList.sort((a, b) => b.profit - a.profit).slice(0, 5),
+          maxVal: maxProfit * 1.1
+        };
+      }, [bills, timeRange, isAuthorized]);
+
+      if (!isAuthorized || !stats) return null;
+
+      return (
+        <div className="p-4 lg:p-8 space-y-6 animate-fade-in bg-gray-50">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <h2 className="text-2xl font-bold text-green-700">📊 สรุปภาพรวม</h2>
+            <div className="flex bg-gray-200 p-1 rounded-xl w-fit shadow-inner">
+              {['week', 'month', 'quarter', 'year_months', 'year'].map(r => (
+                <button key={r} onClick={() => setTimeRange(r)}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${timeRange === r ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}>
+                  {r === 'week' ? 'อาทิตย์' : r === 'month' ? 'เดือน' : r === 'quarter' ? 'ไตรมาส' : r === 'year_months' ? 'ปี' : '5ปีย้อนหลัง'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard title="รายได้รวม" value={formatCurrency(stats.totalSale)} icon="💰" color="text-blue-600" />
+            <StatCard title="กำไรสุทธิ" value={formatCurrency(stats.totalProfit)} icon="💵" color="text-emerald-600" />
+            <StatCard title="จำนวนบิล" value={`${stats.totalBills} ใบ`} icon="📝" color="text-orange-600" />
+            <StatCard title="เฉลี่ย/บิล" value={formatCurrency(stats.totalSale / (stats.totalBills || 1))} icon="📊" color="text-purple-600" />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white p-5 rounded-2xl shadow-sm border flex flex-col h-[450px]">
+              <h3 className="text-lg font-bold mb-2 text-green-700">📈 กราฟวิเคราะห์กำไรสุทธิ</h3>
+
+              <div className="relative mt-4 mb-8 flex-1 w-full">
+                <div className="h-full flex items-end space-x-1 relative border-b-2 border-l-2 border-gray-200 pb-1 ml-12 mr-2">
+
+                  {/* Y-Axis Labels */}
+                  <div className="absolute left-[-45px] top-0 h-full flex flex-col justify-between text-[10px] text-gray-400 font-bold text-right w-[40px]">
+                    <span>{Math.round(stats.maxVal).toLocaleString()}</span>
+                    <span>{Math.round(stats.maxVal * 0.5).toLocaleString()}</span>
+                    <span>0</span>
+                  </div>
+
+                  {/* Bars */}
+                  {stats.chartData.map((data, i) => (
+                    <div key={i} className="flex-1 flex flex-col items-center group relative h-full justify-end px-[1px]">
+
+                      {/* Hover Tooltip (2 บรรทัด) */}
+                      <div className="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-[11px] py-2 px-3 rounded-lg z-30 shadow-xl whitespace-nowrap pointer-events-none ring-1 ring-white/20">
+                        <div className="text-center border-b border-gray-700 mb-1 pb-1 font-bold">{stats.labels[i]}</div>
+                        <div className="flex justify-between space-x-4">
+                          <span className="text-gray-400">รายได้:</span>
+                          <span className="font-bold">{data.sale.toLocaleString()} บ.</span>
+                        </div>
+                        <div className="flex justify-between space-x-4">
+                          <span className="text-green-300">กำไร:</span>
+                          <span className="font-bold text-green-400">{data.profit.toLocaleString()} บ.</span>
+                        </div>
+                      </div>
+
+                      {/* แท่งกราฟกำไร (สีน้ำเงิน) */}
+                      <div
+                        className="w-full bg-green-500 rounded-t-sm transition-all duration-200 hover:bg-green-600 hover:scale-x-105 shadow-sm cursor-pointer"
+                        style={{ height: `${(data.profit / stats.maxVal) * 100}%`, minHeight: data.profit > 0 ? '4px' : '0' }}
+                      >
+                      </div>
+
+                      {/* X-Axis Labels */}
+                      <div className="absolute top-full mt-2 w-full text-center">
+                        <span className={`text-[9px] text-gray-500 font-bold block ${timeRange === 'month' ? 'rotate-45 mt-1 ml-2' : ''}`}>
+                          {stats.labels[i]}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <ProductList title="🏆 สินค้าขายดี (จำนวน)" data={stats.topQty} unit="ชิ้น" color="text-green-600" isQty={true} />
+              <ProductList title="💰 กำไรสูงสุด (บาท)" data={stats.topProfit} unit="" color="text-blue-600" isQty={false} formatCurrency={formatCurrency} />
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const ProductList = ({ title, data, unit, color, isQty, formatCurrency }) => (
+      <div className="bg-white p-5 rounded-2xl shadow-sm border">
+        <h3 className="text-sm font-bold text-gray-700 mb-3">{title}</h3>
+        <div className="space-y-2">
+          {data.length > 0 ? data.map((p, i) => (
+            <div key={i} className="flex justify-between items-center text-[13px] border-b border-gray-50 pb-1">
+              <span className="truncate flex-1 text-gray-600">{i + 1}. {p.name}</span>
+              <span className={`font-bold ${color}`}>
+                {isQty ? p.qty : formatCurrency(p.profit)} {unit}
+              </span>
+            </div>
+          )) : <div className="text-gray-400 text-xs">ไม่มีข้อมูล</div>}
+        </div>
+      </div>
+    );
+
+    const StatCard = ({ title, value, icon, color }) => (
+      <div className="bg-white p-6 rounded-2xl shadow-sm border flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="flex justify-between items-start">
+          <p className="text-xl font-bold text-gray-500">{title}</p>
+          <span className="text-xl">{icon}</span>
+        </div>
+        <div className="mt-4">
+          <h3 className={`text-2xl font-black ${color}`}>{value}</h3>
+        </div>
+      </div>
+    );
+
+    // --- Promotion View (เวอร์ชันใช้ Popup ของระบบ) ---
+    const PromotionView = ({ products, setPopupContent, setShowPopup }) => {
+      const [promotions, setPromotions] = React.useState([]);
+      const [formData, setFormData] = React.useState({
+        name: '',
+        type: 'qty',
+        items: [],
+        minQty: 1,
+        discountPrice: ''
+      });
+      const [searchTerm, setSearchTerm] = React.useState('');
+
+      const fetchPromotions = async () => {
+        const data = await getAll('promotions');
+        if (data) {
+          const sortedData = data.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+          setPromotions(sortedData);
+        } else {
+          setPromotions([]);
+        }
+      };
+
+      React.useEffect(() => {
+        fetchPromotions();
+      }, []);
+
+      // ฟังก์ชันเรียกใช้งาน Popup แจ้งเตือน
+      const showAppPopup = (title, message) => {
+        setPopupContent({ title, message });
+        setShowPopup(true);
+      };
+
+      const handleSave = async () => {
+        if (!formData.name || !formData.discountPrice || formData.items.length === 0) {
+          showAppPopup('⚠️ ข้อมูลไม่ครบ', 'กรุณากรอกข้อมูลให้ครบถ้วน');
+          return;
+        }
+        await putData('promotions', { ...formData, discountPrice: Number(formData.discountPrice) });
+        setFormData({ name: '', type: 'qty', items: [], minQty: 1, discountPrice: '' });
+        fetchPromotions();
+        showAppPopup('✅ สำเร็จ', 'บันทึกโปรโมชั่นใหม่เรียบร้อยแล้ว');
+      };
+
+      const deletePromo = async (id) => {
+        setPopupContent({
+          title: '❓ ยืนยันการลบ',
+          message: 'คุณต้องการลบโปรโมชั่นนี้ใช่หรือไม่? การลบแล้วไม่สามารถย้อนคืนได้',
+          actions: [
+            {
+              label: 'ยกเลิก',
+              handler: () => setShowPopup(false), // เปลี่ยนจาก handler เป็น onClick
+              variant: 'secondary' // สีเทา
+            },
+            {
+              label: 'ยืนยันการลบ',
+              handler: async () => { // เปลี่ยนจาก handler เป็น onClick
+                try {
+                  const db = await openDB();
+                  const tx = db.transaction('promotions', 'readwrite');
+                  await tx.objectStore('promotions').delete(id);
+                  setShowPopup(false);
+                  fetchPromotions();
+                } catch (err) {
+                  console.error(err);
+                  setShowPopup(false);
+                }
+              },
+              variant: 'danger' // ระบบจะเปลี่ยนเป็นสีแดง (bg-red-600) ให้โดยอัตโนมัติ
+            }
+          ]
+        });
+        setShowPopup(true);
+      };
+
+      const filteredProducts = products.filter(p =>
+        p.name.toLowerCase().includes(searchTerm.toLowerCase())
+      ).slice(0, 5);
+
+      return (
+        <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">🎁 จัดการโปรโมชั่น</h1>
+              <p className="text-gray-500">สร้างส่วนลดพิเศษและรายการจับคู่สินค้า</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-1 space-y-4">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-green-100 space-y-4">
+                <h3 className="font-bold text-lg text-green-700">สร้างโปรโมชั่นใหม่</h3>
+
+                <input
+                  className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  placeholder="ชื่อโปรโมชั่น (เช่น ก.ชุดสุดคุ้ม)"
+                  value={formData.name}
+                  onChange={e => setFormData({ ...formData, name: e.target.value })}
+                />
+
+                <select
+                  className="w-full border p-2 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  value={formData.type}
+                  onChange={e => setFormData({ ...formData, type: e.target.value, items: [] })}
+                >
+                  <option value="qty"> ซื้อครบจำนวน (Quantity)</option>
+                  <option value="bundle"> จับคู่สินค้า (Bundle)</option>
+                </select>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-600">เลือกสินค้าเข้าร่วม:</label>
+                  <input
+                    className="w-full border p-2 rounded-lg text-sm"
+                    placeholder="ค้นหาชื่อสินค้า..."
+                    onChange={e => setSearchTerm(e.target.value)}
+                    value={searchTerm}
+                  />
+                  {searchTerm && (
+                    <div className="border rounded-lg overflow-hidden bg-white shadow-lg">
+                      {filteredProducts.map(p => (
+                        <div
+                          key={p.id}
+                          className="p-2 hover:bg-green-50 cursor-pointer text-sm border-b last:border-0"
+                          onClick={() => {
+                            if (formData.type === 'bundle' && formData.items.length >= 2) {
+                              showAppPopup('ข้อจำกัด', 'แบบจับคู่เลือกได้สูงสุด 2 อย่างครับ');
+                              return;
+                            }
+                            if (formData.type === 'qty' && formData.items.length >= 1) {
+                              showAppPopup('ข้อจำกัด', 'แบบซื้อครบจำนวนเลือกได้ 1 อย่างครับ');
+                              return;
+                            }
+                            setFormData({ ...formData, items: [...formData.items, { id: p.id, name: p.name }] });
+                            setSearchTerm('');
+                          }}
+                        >
+                          {p.name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {formData.items.map((it, idx) => (
+                    <span key={idx} className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs flex items-center gap-1">
+                      {it.name}
+                      <button onClick={() => setFormData({ ...formData, items: formData.items.filter((_, i) => i !== idx) })} className="font-bold">×</button>
+                    </span>
+                  ))}
+                </div>
+
+                {formData.type === 'qty' && (
+                  <div>
+                    <label className="text-xs text-gray-500">จำนวนที่ต้องซื้อถึงจะได้ส่วนลด</label>
+                    <input
+                      type="number"
+                      className="w-full border p-2 rounded-lg"
+                      placeholder="จำนวนขั้นต่ำ (เช่น 3 ชิ้น)"
+                      value={formData.minQty}
+                      onChange={e => setFormData({ ...formData, minQty: Number(e.target.value) })}
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs text-gray-500">ราคารวมพิเศษหลังหักส่วนลด</label>
+                  <input
+                    type="number"
+                    className="w-full border p-2 rounded-lg font-bold text-green-600"
+                    placeholder="ราคาพิเศษ (บาท)"
+                    value={formData.discountPrice}
+                    onChange={e => setFormData({ ...formData, discountPrice: e.target.value })}
+                  />
+                </div>
+
+                <button
+                  onClick={handleSave}
+                  className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition shadow-md"
+                >
+                  บันทึกโปรโมชั่น
+                </button>
+              </div>
+            </div>
+
+            <div className="lg:col-span-2">
+              <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50 border-b text-gray-600">
+                    <tr>
+                      <th className="p-4">ชื่อโปรโมชั่น</th>
+                      <th className="p-4">เงื่อนไข</th>
+                      <th className="p-4 text-right">ราคาพิเศษ</th>
+                      <th className="p-4"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {promotions.length > 0 ? promotions.map(promo => (
+                      <tr key={promo.id} className="border-b last:border-0 hover:bg-gray-50 transition">
+                        <td className="p-4">
+                          <div className="font-bold text-gray-800">{promo.name}</div>
+                        </td>
+                        <td className="p-4">
+                          <div className="text-sm">
+                            {promo.type === 'bundle' ? ' จับคู่:' : ` ซื้อ ${promo.minQty} ชิ้น:`}
+                          </div>
+                          <div className="text-xs text-blue-600 font-medium">
+                            {promo.items.map(it => it.name).join(' + ')}
+                          </div>
+                        </td>
+                        <td className="p-4 text-right font-bold text-green-600">
+                          {promo.discountPrice.toLocaleString()} ฿
+                        </td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => deletePromo(promo.id)} className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-full transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="4" className="p-10 text-center text-gray-400">ยังไม่มีข้อมูลโปรโมชั่น</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // --- 4. Main App Component ---
+
+    const App = () => {
+      const translateBarcode = (text) => {
+        if (!text) return '';
+
+        // 1. Map ตัวอักษรไทยตามที่ท่านกำหนด
+        const map = {
+          'ๅ': '1', '/': '2', '-': '3', 'ภ': '4', 'ถ': '5', 'ุ': '6', 'ึ': '7', 'ค': '8', 'ต': '9', 'จ': '0',
+          'ข': '-', 'ช': '=',
+          '+': '1', '๑': '2', '๒': '3', '๓': '4', '๔': '5', 'ู': '6', '฿': '7', '๕': '8', '๖': '9', '๗': '0',
+        };
+
+        // 2. แปลงค่าตาม Map
+        let result = [...text].map(c => map[c] || c).join('');
+
+        // 3. จัดการอักขระที่ไม่จำเป็นและจัดรูปแบบ
+        return result.replace(/[^A-Za-z0-9-]/g, '') // กรองเหลือแค่ A-Z, a-z, 0-9, และขีดกลาง (-)
+          .trim()                      // ลบช่องว่างหัวท้ายที่อาจมาจากเครื่องสแกน
+          .toLowerCase();              // แปลงเป็นตัวพิมพ์เล็กทั้งหมดเพื่อป้องกันปัญหา Case Sensitivity
+      };
+      // State for Navigation and Data
+      const [currentPage, setCurrentPage] = useState('dashboard');
+      const [products, setProducts] = useState([]);
+      const [bills, setBills] = useState([]);
+      const [isDbReady, setIsDbReady] = useState(false);
+      const [currentBillId, setCurrentBillId] = useState(null);
+      const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+      const [showPopup, setShowPopup] = useState(false);
+      const [popupContent, setPopupContent] = useState(null);
+      // --- Sensitive display (กำไร/ต้นทุน) ---
+      const [sensitiveVisible, setSensitiveVisible] = useState(false);
+      const SENSITIVE_PASSWORD = '261250'; // <-- เปลี่ยนรหัสตรงนี้ตามต้องการ
+
+      // --- Replace all prompt() with modal-based password confirm ---
+      const [showPasswordModal, setShowPasswordModal] = useState(false);
+      const [passwordInput, setPasswordInput] = useState('');
+      const [passwordVisible, setPasswordVisible] = useState(false);
+      const [passwordError, setPasswordError] = useState('');
+      const passwordOnSuccessRef = useRef(null);
+      const passwordInputRef = useRef(null);
+
+      const openPasswordModal = (onSuccess) => {
+        passwordOnSuccessRef.current = onSuccess;
+        setPasswordInput('');
+        setPasswordVisible(false);
+        setPasswordError('');
+        setShowPasswordModal(true);
+        // focus will happen in modal mount effect
+      };
+
+      const PasswordConfirmModal = () => {
+        useEffect(() => {
+          setTimeout(() => passwordInputRef.current?.focus(), 50);
+        }, []);
+
+        const verify = () => {
+          if (passwordInput === SENSITIVE_PASSWORD) {
+            // call stored callback (if any)
+            try { passwordOnSuccessRef.current && passwordOnSuccessRef.current(); } catch (e) { console.error(e); }
+            setShowPasswordModal(false);
+            setPasswordInput('');
+            setPasswordVisible(false);
+            setPasswordError('');
+          } else {
+            setPasswordError('รหัสไม่ถูกต้อง กรุณาลองใหม่');
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-fade-in-up">
+              <div className="flex items-center justify-center mb-4">
+                <div className="bg-gray-100 rounded-full p-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="size-6">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+                  </svg>
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-center text-gray-900 mb-2">กรุณาใส่รหัส</h3>
+              <p className="text-gray-600 text-center mb-4">กรุณาใส่รหัสเพื่อยืนยันการกระทำ</p>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">รหัส</label>
+                <div className="relative">
+                  <input
+                    ref={passwordInputRef}
+                    type={passwordVisible ? "text" : "password"}
+                    value={passwordInput}
+                    onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(''); }}
+                    className="w-full p-3 pr-10 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                    placeholder="ใส่รหัสยืนยัน"
+                    onKeyDown={(e) => { if (e.key === 'Enter') verify(); }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setPasswordVisible(v => !v); setTimeout(() => passwordInputRef.current?.focus(), 0); }}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                    aria-label="Toggle password visibility"
+                  >
+                    {passwordVisible ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 012.03-3.274M6.1 6.1A9.95 9.95 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.015 10.015 0 01-4.53 5.29M3 3l18 18" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {passwordError && <p className="mt-2 text-sm text-red-600">{passwordError}</p>}
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => { setShowPasswordModal(false); setPasswordInput(''); setPasswordError(''); setPasswordVisible(false); }}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={verify}
+                  className="px-4 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600"
+                >
+                  ยืนยัน
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+      // --- end password modal ---
+
+      const requestPasswordAndToggle = () => {
+        if (sensitiveVisible) {
+          setSensitiveVisible(false);
+          return;
+        }
+        // open modal instead of prompt
+        openPasswordModal(() => setSensitiveVisible(true));
+      };
+
+      const displayMaybeMasked = (value, mask = false) => {
+        if (!mask) return formatCurrency(value);
+        return sensitiveVisible ? formatCurrency(value) : 'xxxx';
+      };
+
+      // --- Data Fetching and Initialization ---
+      const loadData = useCallback(async () => {
+        try {
+          await loadPdfLibs(); // โหลด library สำหรับ PDF
+
+          // ดึงข้อมูลครั้งแรกจาก Firebase มาใส่ใน State
+          const productSnapshot = await db.collection(PRODUCT_STORE).get();
+          const loadedProducts = productSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          const billSnapshot = await db.collection(BILL_STORE).get();
+          const loadedBills = billSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          setProducts(loadedProducts);
+          // เรียงบิลตามวันที่ล่าสุด
+          setBills(loadedBills.sort((a, b) => new Date(b.date) - new Date(a.date)));
+
+          setIsDbReady(true); // เปลี่ยนสถานะเป็นโหลดเสร็จแล้ว
+          console.log('Firebase data loaded successfully.');
+        } catch (e) {
+          console.error("Initial data load failed:", e);
+          setPopupContent({
+            title: "ข้อผิดพลาด",
+            message: "ไม่สามารถดึงข้อมูลจาก Cloud ได้ กรุณาเช็คอินเทอร์เน็ตหรือ Firebase Rules"
+          });
+          setShowPopup(true);
+          setIsDbReady(true);
+        }
+      }, []);
+
+      // เรียกใช้งาน loadData ทันทีเมื่อเปิดแอป
+      useEffect(() => {
+        loadData();
+
+        // ส่วนของการดักฟังแบบ Real-time (มีอยู่แล้ว)
+        const unsubProducts = subscribeData(PRODUCT_STORE, (data) => setProducts(data));
+        const unsubBills = subscribeData(BILL_STORE, (data) => setBills(data));
+
+        return () => {
+          unsubProducts();
+          unsubBills();
+        };
+      }, [loadData]);
+
+      useEffect(() => {
+        loadPdfLibs();
+
+        const unsubProducts = subscribeData(PRODUCT_STORE, (data) => setProducts(data));
+        const unsubBills = subscribeData(BILL_STORE, (data) => setBills(data));
+
+        return () => {
+          unsubProducts();
+          unsubBills();
+        };
+      }, []);
+
+      // ปิด autocomplete / คำแนะนำของเบราว์เซอร์ สำหรับ form / input / textarea
+      useEffect(() => {
+        const disableAuto = () => {
+          document.querySelectorAll('form, input, textarea').forEach(el => {
+            try {
+              el.setAttribute('autocomplete', 'off');
+              el.setAttribute('autocorrect', 'off');
+              el.setAttribute('autocapitalize', 'off');
+              el.setAttribute('spellcheck', 'false');
+              // ถ้าไม่มี name บางเบราว์เซอร์จะยัง autofill -> ใส่ name ชั่วคราวแบบสุ่ม
+              if (el.tagName.toLowerCase() === 'input' && !el.getAttribute('name')) {
+                el.setAttribute('name', `noautofill_${Math.random().toString(36).slice(2, 8)}`);
+              }
+            } catch (e) { /* ignore */ }
+          });
+        };
+
+        // เรียกทันทีและเฝ้าดูการเปลี่ยนแปลง DOM เพื่อให้ attribute ถูกตั้งกับ elements ที่ถูกสร้างภายหลัง
+        disableAuto();
+        const mo = new MutationObserver(disableAuto);
+        mo.observe(document.body, { childList: true, subtree: true });
+
+        return () => mo.disconnect();
+      }, []);
+
+      // --- Helper State for Current Day Bills ---
+      const today = useMemo(() => {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      }, []);
+
+      const todayBills = useMemo(() => {
+        return bills.filter(bill => new Date(bill.date).getTime() >= today);
+      }, [bills, today]);
+
+      const dailySummary = useMemo(() => {
+        return todayBills.reduce((acc, bill) => {
+          acc.totalSale += bill.totalSale;
+          acc.totalCost += bill.totalCost;
+          acc.totalProfit += bill.totalProfit;
+          return acc;
+        }, { totalSale: 0, totalCost: 0, totalProfit: 0 });
+      }, [todayBills]);
+
+      // --- Global Navigation & Actions ---
+
+      const navigateTo = (page, billId = null) => {
+        setCurrentBillId(billId);
+        setCurrentPage(page);
+        setIsSidebarOpen(false); // Close sidebar on mobile
+      };
+
+      const showBillDetails = (billId) => {
+        setCurrentBillId(billId);
+        setCurrentPage('billDetail');
+      };
+
+      // --- 5. Shared UI Components ---
+
+      const LoadingSpinner = () => (
+        <div className="flex justify-center items-center h-screen bg-gray-50">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-green-500"></div>
+          <p className="ml-4 text-green-700 font-semibold">กำลังโหลดข้อมูล...</p>
+        </div>
+      );
+
+      const Header = ({ title }) => (
+        <header className="flex items-center justify-between p-4 bg-white shadow-md sticky top-0 z-10">
+          <div className="flex items-center">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 mr-3 text-green-600 rounded-full hover:bg-green-100 transition duration-150 lg:hidden"
+              aria-label="Toggle Menu"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h1 className="text-2xl font-bold text-green-700">{title}</h1>
+          </div>
+          <div className="flex items-center space-x-2">
+            {/* ปรับสไตล์ให้เหมือนปุ่มเคลียร์ประวัติ (ขนาดเล็กลง) */}
+            <button
+              onClick={requestPasswordAndToggle}
+              title={sensitiveVisible ? 'ซ่อนยอดกำไร/ต้นทุน' : 'แสดงยอดกำไร/ต้นทุน'}
+              className={`px-3 py-2 rounded-lg text-sm flex items-center space-x-2 transition ${sensitiveVisible ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              aria-pressed={sensitiveVisible}
+            >
+              <span className="sr-only">{sensitiveVisible ? 'ซ่อนยอด' : 'แสดงยอด'}</span>
+              {sensitiveVisible ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 012.03-3.274M6.1 6.1A9.95 9.95 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.015 10.015 0 01-4.53 5.29M3 3l18 18" /></svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+              )}
+            </button>
+          </div>
+        </header>
+      );
+
+      const FloatingActionButton = ({ onClick, label }) => (
+        <button
+          onClick={onClick}
+          aria-label={label}
+          className="fixed bottom-6 right-6 lg:bottom-10 lg:right-10 w-14 h-14 bg-green-500 text-white rounded-full shadow-lg hover:bg-green-600 transition-all duration-300 transform hover:scale-110 flex items-center justify-center text-3xl font-light z-30"
+        >
+          +
+        </button>
+      );
+
+      const ModalPopup = ({ title, message, onClose, actions }) => (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-fade-in-up">
+            <h3 className="text-xl font-bold text-green-700 mb-4 border-b pb-2">{title}</h3>
+            <p className="text-gray-700 mb-6">{message}</p>
+            <div className="flex justify-end space-x-3">
+              {actions && actions.map((action, index) => (
+                <button
+                  key={index}
+                  onClick={() => { action.handler(); onClose(); }}
+                  className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${action.variant === 'danger'
+                    ? 'bg-red-500 text-white hover:bg-red-600' // สีแดงสำหรับลบ
+                    : action.primary
+                      ? 'bg-green-500 text-white hover:bg-green-600'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                >
+                  {action.label}
+                </button>
+              ))}
+              {!actions && (
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300 transition duration-200"
+                >
+                  ปิด
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+
+      // --- 6. Sidebar Component (In-File) ---
+      const Sidebar = () => {
+        const menuItems = [
+          { id: 'dashboard', label: '🏠 Dashboard (หน้าหลัก)' },
+          // [NEW] ประวัติบิลทั้งหมด
+          { id: 'billHistory', label: '📜 ประวัติบิลทั้งหมด' },
+          { id: 'promotions', label: '🎁 จัดการโปรโมชั่น' },
+          { id: 'manageProducts', label: '📦 จัดการสินค้า' },
+          { id: 'overview', label: '📊 สรุปภาพรวมร้านค้า' },
+        ];
+
+        return (
+          <div className={`fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 transition-transform duration-300 ease-in-out z-40`}>
+            {/* Overlay for mobile */}
+            {isSidebarOpen && (
+              <div className="fixed inset-0 bg-black opacity-30 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>
+            )}
+            <aside className={`w-64 h-full bg-green-50 text-green-800 shadow-xl p-4 flex flex-col`}>
+              <div className="text-2xl font-black text-green-700 mb-8 mt-2 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 13a2 2 0 002 2h12a2 2 0 002-2v-2a1 1 0 10-2 0v2H4v-2a1 1 0 10-2 0v2z" /></svg>
+                <span className='font-inter'>รุ่งฟ้าแอร์</span>
+              </div>
+              <nav className="space-y-2">
+                {menuItems.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => navigateTo(item.id)}
+                    className={`w-full flex items-center p-3 rounded-lg transition duration-150 ${currentPage === item.id
+                      ? 'bg-green-200 text-green-800 font-bold shadow-sm'
+                      : 'text-green-600 hover:bg-green-100'
+                      }`}
+                  >
+                    {item.icon}
+                    <span className="ml-3">{item.label}</span>
+                  </button>
+                ))}
+              </nav>
+            </aside>
+          </div>
+        );
+      };
+
+      // --- 7.5. Reusable Bill Card Component for History ---
+      const HistoryBillCard = ({ bill }) => {
+        const handleDelete = async () => {
+          setPopupContent({
+            title: "ยืนยันการลบบิล",
+            message: `คุณต้องการลบบิลเลขที่ ${bill.id} หรือไม่? ระบบจะคืนสินค้าเข้าสต็อกโดยค้นหาจาก "ชื่อสินค้า"`,
+            actions: [
+              { label: "ยกเลิก", handler: () => { setShowPopup(false); } },
+              {
+                label: "ลบและคืนสต็อก",
+                primary: true,
+                handler: async () => {
+                  try {
+                    // 1. วนลูปรายการสินค้าที่มีอยู่ในบิล (bill.items)
+                    if (bill.items && bill.items.length > 0) {
+                      for (const item of bill.items) {
+
+                        // ค้นหาสินค้าในสต็อก (products) ที่มีชื่อตรงกับในบิล (item.name)
+                        // ใช้ .trim() เพื่อตัดช่องว่างที่อาจหลงมาจากการพิมพ์หรือ Import
+                        const currentProd = products.find(p =>
+                          String(p.name).trim() === String(item.name).trim()
+                        );
+
+                        if (currentProd) {
+                          // ตัวแปรในไฟล์คุณ: 
+                          // จำนวนขาย = item.quantity
+                          // จำนวนสต็อกปัจจุบัน = currentProd.stock
+                          const refundQty = Number(item.qty) || 0;
+                          const currentStock = Number(currentProd.stock) || 0;
+                          const newStock = currentStock + refundQty;
+
+                          // อัปเดตกลับฐานข้อมูลโดยใช้ id ของสินค้าตัวที่หาเจอ
+                          await putData(PRODUCT_STORE, {
+                            ...currentProd,
+                            stock: newStock
+                          });
+                          console.log(`คืนสต็อกชื่อ: ${item.name} | เดิม: ${currentStock} | คืน: ${refundQty} | ใหม่: ${newStock}`);
+                        } else {
+                          console.warn(`หาชื่อสินค้า "${item.name}" ไม่เจอในสต็อก`);
+                        }
+                      }
+                    }
+
+                    // 2. ลบบิลออกจากฐานข้อมูล (BILL_STORE)
+                    await deleteData(BILL_STORE, bill.id);
+
+                    setPopupContent({
+                      title: "สำเร็จ",
+                      message: `ลบบิลเรียบร้อยและคืนสต็อกสินค้าที่ชื่อตรงกันให้แล้ว`
+                    });
+                    setShowPopup(true);
+                  } catch (error) {
+                    console.error("Delete Error:", error);
+                    setPopupContent({
+                      title: "ข้อผิดพลาด",
+                      message: "เกิดปัญหา: " + error.message
+                    });
+                    setShowPopup(true);
+                  }
+                }
+              }
+            ]
+          });
+          setShowPopup(true);
+        };
+
+        return (
+          <div className="bg-white p-4 rounded-xl shadow-md border-l-4 border-green-400 flex justify-between items-center transition duration-200 hover:shadow-lg">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-gray-500">
+                {formatDate(bill.date)}
+              </div>
+              <h4 className="text-lg font-bold text-gray-700 truncate">บิลที่: #{bill.id}</h4>
+              <p className="text-sm text-gray-600 truncate">ลูกค้า/ช่าง: {bill.customer || 'ไม่ระบุ'}</p>
+            </div>
+            <div className="flex space-x-2 ml-4">
+              <button
+                onClick={() => showBillDetails(bill.id)}
+                className="p-2 bg-green-100 text-green-600 rounded-full hover:bg-green-200"
+                aria-label="View Details"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7a10.015 10.015 0 01-4.53 5.29M3 3l18 18" /></svg>
+              </button>
+              <button
+                onClick={handleDelete}
+                className="p-2 bg-red-100 text-red-600 rounded-full hover:bg-red-200"
+                aria-label="Delete Bill"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+              </button>
+            </div>
+          </div>
+        );
+      };
+
+      // --- 7.6. Bill History View (New Component) ---
+      const BillHistoryView = () => {
+        const [filterTerm, setFilterTerm] = useState('');
+        const [dateFrom, setDateFrom] = useState('');
+        const [dateTo, setDateTo] = useState('');
+        // เพิ่ม state สำหรับ pagination
+        const [currentPage, setCurrentPage] = useState(1);
+        const billsPerPage = 15;
+
+        // [NEW] State สำหรับยืนยันการลบประวัติ
+        const [showClearConfirm, setShowClearConfirm] = useState(false);
+        const [clearPassword, setClearPassword] = useState('');
+        const [clearError, setClearError] = useState('');
+        // แก้ไข state สำหรับแสดง/ซ่อนรหัส
+        const [clearPasswordVisible, setClearPasswordVisible] = useState(false);
+
+        const filteredBills = useMemo(() => {
+          let list = bills;
+          if (filterTerm) {
+            const lowerFilter = filterTerm.toString().toLowerCase();
+            list = list.filter(bill => {
+              if (bill.id && bill.id.toString().includes(lowerFilter)) return true;
+              if (bill.customer && bill.customer.toLowerCase().includes(lowerFilter)) return true;
+              if (bill.items && bill.items.some(item => item.name.toLowerCase().includes(lowerFilter))) return true;
+              return false;
+            });
+          }
+
+          if (dateFrom || dateTo) {
+            const start = dateFrom ? new Date(dateFrom) : null;
+            const end = dateTo ? new Date(dateTo) : null;
+            if (start) start.setHours(0, 0, 0, 0);
+            if (end) end.setHours(23, 59, 59, 999);
+            list = list.filter(bill => {
+              const t = new Date(bill.date).getTime();
+              if (start && t < start.getTime()) return false;
+              if (end && t > end.getTime()) return false;
+              return true;
+            });
+          }
+
+          return list;
+        }, [bills, filterTerm, dateFrom, dateTo]);
+
+        // คำนวณจำนวนหน้าทั้งหมด
+        const totalPages = Math.ceil(filteredBills.length / billsPerPage);
+
+        // ดึงรายการสำหรับหน้าปัจจุบัน
+        const currentBills = useMemo(() => {
+          const startIndex = (currentPage - 1) * billsPerPage;
+          return filteredBills.slice(startIndex, startIndex + billsPerPage);
+        }, [filteredBills, currentPage]);
+
+        // component สำหรับปุ่ม pagination
+        const Pagination = () => {
+          const maxPageButtons = 5; // จำนวนปุ่มตัวเลขที่จะแสดง
+          let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
+          let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
+
+          // ปรับ startPage ถ้า endPage ชนขอบ
+          if (endPage - startPage + 1 < maxPageButtons) {
+            startPage = Math.max(1, endPage - maxPageButtons + 1);
+          }
+
+          return (
+            <div className="flex justify-center items-center space-x-2 mt-6">
+              {/* ปุ่มก่อนหน้า */}
+              <button
+                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                ←
+              </button>
+
+              {/* ปุ่มหน้าแรก */}
+              {startPage > 1 && (
+                <>
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    1
+                  </button>
+                  {startPage > 2 && <span className="px-2">...</span>}
+                </>
+              )}
+
+              {/* ปุ่มตัวเลขหน้า */}
+              {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
+                >
+                  {page}
+                </button>
+              ))}
+
+              {/* ปุ่มหน้าสุดท้าย */}
+              {endPage < totalPages && (
+                <>
+                  {endPage < totalPages - 1 && <span className="px-2">...</span>}
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    className={`px-3 py-1 rounded-lg ${currentPage === totalPages ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    {totalPages}
+                  </button>
+                </>
+              )}
+
+              {/* ปุ่มถัดไป */}
+              <button
+                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                →
+              </button>
+            </div>
+          );
+        };
+
+        // ฟังก์ชันสำหรับเคลียร์ประวัติบิล
+        const handleClearHistory = async () => {
+          if (clearPassword !== SENSITIVE_PASSWORD) {
+            setClearError('รหัสไม่ถูกต้อง กรุณาลองใหม่');
+            return;
+          }
+
+          try {
+            // ดึงบิลทั้งหมดที่จะลบตามเงื่อนไขการกรอง
+            const billsToDelete = filteredBills;
+
+            // ลบทีละรายการ
+            for (const bill of billsToDelete) {
+              await deleteData(BILL_STORE, bill.id);
+            }
+
+            // ปิด modal และรีเซ็ตค่า
+            setShowClearConfirm(false);
+            setClearPassword('');
+            setClearError('');
+
+            // แสดงข้อความสำเร็จ
+            setPopupContent({
+              title: "สำเร็จ",
+              message: `ลบประวัติบิลทั้งหมด ${billsToDelete.length} รายการเรียบร้อยแล้ว`
+            });
+            setShowPopup(true);
+
+          } catch (error) {
+            console.error("Error clearing history:", error);
+            setPopupContent({
+              title: "เกิดข้อผิดพลาด",
+              message: "ไม่สามารถลบประวัติบิลได้ กรุณาลองใหม่อีกครั้ง"
+            });
+            setShowPopup(true);
+          }
+        };
+
+        // Modal สำหรับยืนยันการเคลียร์ประวัติ
+        const ClearHistoryModal = () => {
+          const inputRef = useRef(null);
+
+          useEffect(() => {
+            // focus เมื่อ modal mount
+            if (inputRef.current) {
+              setTimeout(() => inputRef.current.focus(), 50);
+            }
+          }, []);
+
+          return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-fade-in-up">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="bg-red-100 rounded-full p-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold text-center text-gray-900 mb-4">ยืนยันการเคลียร์ประวัติบิล</h3>
+                <p className="text-gray-600 text-center mb-6">
+                  คุณกำลังจะลบประวัติบิลทั้งหมด {filteredBills.length} รายการ
+                  <br />การกระทำนี้ไม่สามารถยกเลิกได้
+                </p>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    กรุณาใส่รหัสเพื่อยืนยัน:
+                  </label>
+                  <div className="relative">
+                    <input
+                      ref={inputRef}
+                      type={clearPasswordVisible ? "text" : "password"}
+                      value={clearPassword}
+                      onChange={(e) => {
+                        setClearPassword(e.target.value);
+                        setClearError('');
+                      }}
+                      className="w-full p-3 pr-10 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500"
+                      placeholder="ใส่รหัสยืนยัน"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClearPasswordVisible(v => !v);
+                        // refocus input หลัง toggle เพื่อไม่ให้ต้องคลิกใหม่
+                        setTimeout(() => { inputRef.current?.focus(); }, 0);
+                      }}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                      aria-label="Toggle password visibility"
+                    >
+                      {clearPasswordVisible ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 012.03-3.274M6.1 6.1A9.95 9.95 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.015 10.015 0 01-4.53 5.29M3 3l18 18" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  {clearError && (
+                    <p className="mt-2 text-sm text-red-600">{clearError}</p>
+                  )}
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setShowClearConfirm(false);
+                      setClearPassword('');
+                      setClearError('');
+                      setClearPasswordVisible(false);
+                    }}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={handleClearHistory}
+                    className="px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600"
+                  >
+                    ยืนยันการลบ
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+            <Header title="📜 ประวัติบิลทั้งหมด" />
+
+            {/* Search + date filter area */}
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="md:col-span-2">
+                <input
+                  type="text"
+                  placeholder="🔍 ค้นหาบิลด้วยเลขที่, ชื่อลูกค้า, หรือชื่อสินค้า..."
+                  value={filterTerm}
+                  onChange={(e) => {
+                    setFilterTerm(e.target.value);
+                    setCurrentPage(1); // รีเซ็ตหน้าเมื่อค้นหา
+                  }}
+                  className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500"
+                />
+              </div>
+
+              <div className="flex space-x-2">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                  title="จากวันที่"
+                />
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                  title="ถึงวันที่"
+                />
+              </div>
+            </div>
+
+            {/* ปุ่มเคลียร์ประวัติ เลื่อนลงมาและชิดขวา */}
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={() => setShowClearConfirm(true)}
+                className="px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm flex items-center"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                เคลียร์ประวัติบิล
+              </button>
+            </div>
+
+            <div className="mt-6">
+              <h2 className="text-xl font-bold text-green-700">
+                รายการบิลทั้งหมด ({filteredBills.length} บิล)
+                <span className="text-sm font-normal text-gray-500 ml-2">
+                  แสดง {(currentPage - 1) * billsPerPage + 1} - {Math.min(currentPage * billsPerPage, filteredBills.length)} รายการ
+                </span>
+              </h2>
+
+              <div className="space-y-3 mt-4">
+                {currentBills.length > 0 ? (
+                  currentBills.map(bill => <HistoryBillCard key={bill.id} bill={bill} />)
+                ) : (
+                  <div className="bg-white p-6 rounded-xl shadow-md text-center text-gray-500">
+                    ไม่พบบิลตามเงื่อนไขที่ค้นหา
+                  </div>
+                )}
+              </div>
+
+              {filteredBills.length > billsPerPage && <Pagination />}
+            </div>
+
+            {/* แสดง Modal เมื่อกดปุ่มเคลียร์ประวัติ */}
+            {showClearConfirm && <ClearHistoryModal />}
+          </div>
+        );
+      };
+
+      // --- 7. Dashboard View ---
+
+      const DashboardView = () => {
+        // BillCard ถูกย้ายมาเป็น component ภายใน DashboardView เพื่อให้สามารถใช้ props ภายในได้
+        const BillCard = ({ bill }) => {
+          const billDate = new Date(bill.date);
+          const isToday = billDate.getTime() >= today;
+
+          const handleDelete = async () => {
+            setPopupContent({
+              title: "ยืนยันการลบบิล",
+              message: `คุณต้องการลบบิลเลขที่ ${bill.id} หรือไม่? ระบบจะคืนสินค้าเข้าสต็อกโดยค้นหาจาก "ชื่อสินค้า"`,
+              actions: [
+                { label: "ยกเลิก", handler: () => { setShowPopup(false); } },
+                {
+                  label: "ลบและคืนสต็อก",
+                  primary: true,
+                  handler: async () => {
+                    try {
+                      // 1. วนลูปรายการสินค้าในบิล (bill.items)
+                      if (bill.items && bill.items.length > 0) {
+                        for (const item of bill.items) {
+
+                          // ค้นหาสินค้าในสต็อกที่ชื่อตรงกัน
+                          const currentProd = products.find(p =>
+                            String(p.name).trim() === String(item.name).trim()
+                          );
+
+                          if (currentProd) {
+                            // *** จุดสำคัญ: ในไฟล์คุณใช้ item.qty (ไม่ใช่ item.quantity) ***
+                            const refundQty = Number(item.qty) || 0;
+                            const currentStock = Number(currentProd.stock) || 0;
+                            const newStock = currentStock + refundQty;
+
+                            // อัปเดตกลับฐานข้อมูล
+                            await putData(PRODUCT_STORE, {
+                              ...currentProd,
+                              stock: newStock
+                            });
+
+                            console.log(`คืนสต็อกชื่อ: ${item.name} | เดิม: ${currentStock} | คืน: ${refundQty} | ใหม่: ${newStock}`);
+                          }
+                        }
+                      }
+
+                      // 2. ลบบิล
+                      await deleteData(BILL_STORE, bill.id);
+
+                      setPopupContent({
+                        title: "สำเร็จ",
+                        message: `ลบบิลเรียบร้อยและคืนสต็อกสินค้าให้แล้ว`
+                      });
+                      setShowPopup(true);
+                    } catch (error) {
+                      console.error("Delete Error:", error);
+                      setPopupContent({ title: "ข้อผิดพลาด", message: "เกิดปัญหา: " + error.message });
+                      setShowPopup(true);
+                    }
+                  }
+                }
+              ]
+            });
+            setShowPopup(true);
+          };
+
+          return (
+            <div className="bg-white p-4 rounded-xl shadow-md border-l-4 border-green-400 flex justify-between items-center transition duration-200 hover:shadow-lg">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-gray-500">
+                  {isToday ? 'บิลวันนี้' : formatDate(bill.date)}
+                </div>
+                <h4 className="text-lg font-bold text-green-700 truncate">บิลที่: #{bill.id}</h4>
+                <p className="text-sm text-gray-600 truncate">ลูกค้า/ช่าง: {bill.customer || 'ไม่ระบุ'}</p>
+                {/* *** แก้ไข: ลบการแสดงกำไรออกจากหน้า Dashboard ตามคำขอ ***
+                    <p className="text-sm font-bold text-red-500">กำไร: {formatCurrency(bill.totalProfit)}</p>
+                    */}
+              </div>
+              <div className="flex space-x-2 ml-4">
+                <button
+                  onClick={() => showBillDetails(bill.id)}
+                  className="p-2 bg-green-100 text-green-600 rounded-full hover:bg-green-200"
+                  aria-label="View Details"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7a10.015 10.015 0 01-4.53 5.29M3 3l18 18" /></svg>
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="p-2 bg-red-100 text-red-600 rounded-full hover:bg-red-200"
+                  aria-label="Delete Bill"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
+            </div>
+          );
+        };
+
+        const SummaryCard = ({ title, value, colorClass, icon, mask = false }) => (
+          <div className={`bg-white p-5 rounded-xl shadow-lg border-b-4 ${colorClass}`}>
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-500">{title}</div>
+              <div className={`p-2 rounded-full ${colorClass.replace('border-', 'bg-').replace('-500', '-100')} ${colorClass.replace('border-', 'text-').replace('-500', '-600')}`}>
+                {icon}
+              </div>
+            </div>
+            <div className="mt-1 text-3xl font-extrabold text-gray-900">
+              {displayMaybeMasked(value, mask)}
+            </div>
+          </div>
+        );
+
+        // [NEW] ดึงวันที่ปัจจุบันมาแสดง
+        const todayDateString = React.useMemo(() => formatThaiDate(), []);
+
+
+        return (
+          <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+            <Header title="🏠 Dashboard (หน้าหลัก)" />
+
+            {/* [NEW] แสดงวันที่ปัจจุบัน */}
+            <div className="mt-4 p-3 bg-white rounded-xl shadow-md text-left text-lg font-bold text-gray-700">
+              <p>📅{todayDateString}</p>
+            </div>
+
+            {/* Daily Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+              <SummaryCard
+                title="💰 ยอดขายรวมวันนี้"
+                value={dailySummary.totalSale}
+                colorClass="border-blue-500"
+                icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V9m0 3v2m0 3a5 5 0 01-5 5H5a2 2 0 01-2-2v-5l1.45-1.45m17.1-5.74A2 2 0 0121 5H3a2 2 0 000 4h18a2 2 0 012 2v5a2 2 0 01-2 2h-2" /></svg>}
+              />
+              <SummaryCard
+                title="💸 ต้นทุนรวมวันนี้"
+                value={dailySummary.totalCost}
+                colorClass="border-yellow-500"
+                icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>}
+                mask={true} // กำไร = ข้อมูล sensitive
+              />
+              <SummaryCard
+                title="📈 กำไรรวมวันนี้"
+                value={dailySummary.totalSale - dailySummary.totalCost}
+                colorClass="border-green-500"
+                icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
+                mask={true} // กำไร = ข้อมูล sensitive
+              />
+            </div>
+
+            {/* Today's Bills List */}
+            <div className="mt-8">
+              <h2 className="text-xl font-bold text-green-700 mb-4">รายการบิลของวันนี้ ({todayBills.length} บิล)</h2>
+              <div className="space-y-3">
+                {todayBills.length > 0 ? (
+                  todayBills.map(bill => <BillCard key={bill.id} bill={bill} />)
+                ) : (
+                  <div className="bg-white p-6 rounded-xl shadow-md text-center text-gray-500">
+                    วันนี้ยังไม่มีรายการบิล
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <FloatingActionButton onClick={() => navigateTo('addBill')} label="เพิ่มบิลใหม่" />
+          </div>
+        );
+      };
+
+      // --- 8. Product Manager View (เวอร์ชั่นเพิ่มระบบสต็อก) ---
+
+      const ProductManagerView = () => {
+        const [isEditing, setIsEditing] = useState(false);
+        // เพิ่ม stock: 0 เข้าไปใน state เริ่มต้น
+        const [currentProduct, setCurrentProduct] = useState({ id: null, name: '', price: '', cost: '', barcode: '', stock: 0 });
+        const [filterText, setFilterText] = useState('');
+        // เพิ่ม state สำหรับ pagination
+        const [currentPage, setCurrentPage] = useState(1);
+        const itemsPerPage = 25; // จำนวนรายการต่อหน้า
+
+        // กรองสินค้าตามการค้นหา
+        const filteredProducts = products.filter(p => {
+          // 1. เตรียมคำค้นหา: ลบเว้นวรรคออกทั้งหมด และทำเป็นตัวพิมพ์เล็ก
+          const cleanFilterText = filterText.replace(/\s+/g, '').toLowerCase();
+
+          // 2. เตรียมชื่อสินค้า: ลบเว้นวรรคออกทั้งหมด และทำเป็นตัวพิมพ์เล็ก
+          const cleanProductName = (p.name || '').replace(/\s+/g, '').toLowerCase();
+
+          // 3. นำมาเปรียบเทียบกัน
+          return cleanProductName.includes(cleanFilterText);
+        });
+
+        // คำนวณจำนวนหน้าทั้งหมด
+        const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+
+        // ดึงรายการสำหรับหน้าปัจจุบัน
+        const currentProducts = useMemo(() => {
+          const startIndex = (currentPage - 1) * itemsPerPage;
+          return filteredProducts.slice(startIndex, startIndex + itemsPerPage);
+        }, [filteredProducts, currentPage]);
+
+        // ฟังก์ชันสำหรับจัดการการเปลี่ยนแปลงของช่องค้นหา
+        const handleFilterChange = (e) => {
+          // 1. ตั้งค่าข้อความค้นหาใหม่
+          setFilterText(e.target.value);
+          // 2. การแก้ไข: รีเซ็ตกลับไปหน้า 1 เสมอ
+          setCurrentPage(1);
+        };
+
+        // เพิ่ม component Pagination
+        const Pagination = () => {
+          const maxPageButtons = 5;
+          let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
+          let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
+
+          if (endPage - startPage + 1 < maxPageButtons) {
+            startPage = Math.max(1, endPage - maxPageButtons + 1);
+          }
+
+          return (
+            <div className="flex justify-center items-center space-x-2 mt-6 mb-6">
+              {/* ปุ่มก่อนหน้า */}
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                ←
+              </button>
+
+              {/* ปุ่มหน้าแรก */}
+              {startPage > 1 && (
+                <>
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    1
+                  </button>
+                  {startPage > 2 && <span className="px-2">...</span>}
+                </>
+              )}
+
+              {/* ปุ่มตัวเลขหน้า */}
+              {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                >
+                  {page}
+                </button>
+              ))}
+
+              {/* ปุ่มหน้าสุดท้าย */}
+              {endPage < totalPages && (
+                <>
+                  {endPage < totalPages - 1 && <span className="px-2">...</span>}
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    className={`px-3 py-1 rounded-lg ${currentPage === totalPages ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    {totalPages}
+                  </button>
+                </>
+              )}
+
+              {/* ปุ่มถัดไป */}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
+              >
+                →
+              </button>
+            </div>
+          );
+        };
+
+        // --- Export / Import CSV functions ---
+        const exportProductsCSV = () => {
+          if (!products || products.length === 0) {
+            setPopupContent({ title: "ข้อมูลว่าง", message: "ยังไม่มีสินค้าที่จะ export" });
+            setShowPopup(true);
+            return;
+          }
+
+          const BOM = "\uFEFF";
+          const header = ['ID', 'ชื่อสินค้า', 'ราคาขาย', 'ราคาทุน', 'กำไรต่อชิ้น', 'จำนวนสต็อก', 'รหัสบาร์โค้ด'];
+
+          const rows = products.map(p => {
+            const price = Number(p.price) || 0;
+            const cost = Number(p.cost) || 0;
+            const profit = price - cost;
+
+            return [
+              String(p.id), // คอลัมน์แรกเป็น ID เสมอเพื่อใช้รันตอนนำเข้า
+              p.name || '',
+              price.toFixed(2),
+              cost.toFixed(2),
+              profit.toFixed(2),
+              Number(p.stock) || 0,
+              p.barcode || ''
+            ];
+          });
+
+          const csv = BOM + [
+            header.join(','),
+            ...rows.map(r => r.map(v => {
+              const strV = String(v).replace(/"/g, '""');
+              return `"${strV}"`;
+            }).join(','))
+          ].join('\r\n');
+
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const date = new Date().toISOString().slice(0, 10);
+          a.href = url;
+          a.download = `products_export_${date}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+
+          setPopupContent({ title: "Export สำเร็จ", message: `ส่งออกข้อมูลสินค้าทั้งหมด ${products.length} รายการแล้ว` });
+          setShowPopup(true);
+        };
+
+        const parseCSV = (text) => {
+          const lines = [];
+          let cur = '';
+          let inQuotes = false;
+          let row = [];
+          for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            const nxt = text[i + 1];
+            if (ch === '"') {
+              if (inQuotes && nxt === '"') {
+                cur += '"'; i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+              continue;
+            }
+            if (ch === ',' && !inQuotes) {
+              row.push(cur); cur = ''; continue;
+            }
+            if ((ch === '\n' || ch === '\r') && !inQuotes) {
+              if (cur !== '' || row.length > 0) {
+                row.push(cur); lines.push(row); row = []; cur = '';
+              }
+              if (ch === '\r' && nxt === '\n') i++;
+              continue;
+            }
+            cur += ch;
+          }
+          if (cur !== '' || row.length > 0) { row.push(cur); lines.push(row); }
+          return lines;
+        };
+
+        const handleImportFile = async (file) => {
+          if (!file) return;
+          const text = await file.text();
+          const rows = parseCSV(text);
+          if (!rows || rows.length === 0) {
+            setPopupContent({ title: "ข้อผิดพลาด", message: "ไฟล์ CSV ว่างหรือไม่ถูกต้อง" });
+            setShowPopup(true);
+            return;
+          }
+
+          const headerRow = rows[0].map(h => h.trim().toLowerCase());
+          const idIdx = headerRow.findIndex(h => h.includes('id'));
+          const nameIdx = headerRow.findIndex(h => h.includes('name') || h.includes('ชื่อ'));
+          const priceIdx = headerRow.findIndex(h => h.includes('price') || h.includes('ราคาขาย'));
+          const costIdx = headerRow.findIndex(h => h.includes('cost') || h.includes('ราคาทุน'));
+          const stockIdx = headerRow.findIndex(h => h.includes('stock') || h.includes('จำนวน') || h.includes('สต็อก'));
+          const barcodeIdx = headerRow.findIndex(h => h.includes('barcode') || h.includes('รหัสบาร์โค้ด'));
+
+          let startRow = 1;
+          let imported = 0;
+          let skipped = 0;
+
+          for (let r = startRow; r < rows.length; r++) {
+            const cols = rows[r];
+            if (!cols || cols.length === 0) continue;
+
+            // ดึงค่า ID จากไฟล์ (ถ้ามี)
+            const idFromFile = (idIdx >= 0 && cols[idIdx]) ? cols[idIdx].trim() : null;
+            const name = (cols[nameIdx >= 0 ? nameIdx : 0] || '').trim();
+            const priceStr = (cols[priceIdx >= 0 ? priceIdx : 1] || '').trim();
+            const costStr = (cols[costIdx >= 0 ? costIdx : 2] || '').trim();
+            const stockStr = (stockIdx >= 0 ? cols[stockIdx] : '0').trim();
+            const barcode = (barcodeIdx >= 0 ? cols[barcodeIdx] : '').trim();
+
+            if (!name) continue;
+            const price = parseFloat(priceStr.replace(/[^0-9.\-]/g, '')) || 0;
+            const cost = parseFloat(costStr.replace(/[^0-9.\-]/g, '')) || 0;
+            const stock = parseInt(stockStr.replace(/[^0-9\-]/g, '')) || 0;
+
+            // เช็คว่ามีสินค้าเดิมอยู่ไหม (หาจาก ID ก่อน ถ้าไม่มีค่อยหาจากชื่อ)
+            const currentProduct = products.find(p =>
+              (idFromFile && String(p.id) === idFromFile) ||
+              (p.name.toLowerCase() === name.toLowerCase())
+            );
+
+            try {
+              await putData(PRODUCT_STORE, {
+                // แก้ไขจุดสำคัญตรงนี้: 
+                // 1. ถ้ามี ID ในไฟล์ ให้ใช้ ID จากไฟล์
+                // 2. ถ้าไม่มีในไฟล์แต่ชื่อตรงกับของเดิม ให้ใช้ ID เดิม (Update)
+                // 3. ถ้าไม่มีเลย ให้เป็น null เพื่อรัน Auto Increment
+                id: idFromFile ? Number(idFromFile) : (currentProduct ? currentProduct.id : null),
+                name,
+                price,
+                cost,
+                barcode: barcode,
+                stock: stock
+              });
+              imported++;
+            } catch (e) {
+              console.error('Import failed', e);
+            }
+          }
+
+          setPopupContent({ title: "Import เสร็จสิ้น", message: `นำเข้า/อัพเดท ${imported} รายการ, ข้าม ${skipped} รายการ.` });
+          setShowPopup(true);
+        };
+
+        const handleEditProductClick = (product) => {
+          setCurrentProduct({
+            ...product,
+            stock: product.stock || 0 // มั่นใจว่ามีค่า stock
+          });
+          setIsEditing(true);
+        };
+
+        const handleNew = () => {
+          setCurrentProduct({ id: null, name: '', price: '', cost: '', barcode: '', stock: 0 });
+          setIsEditing(true);
+        };
+
+        const handleChange = (e) => {
+          const { name, value } = e.target;
+          let finalValue = value;
+
+          if (name === 'barcode') {
+            finalValue = translateBarcode(value);
+          } else if (name === 'price' || name === 'cost') {
+            finalValue = parseFloat(value) || '';
+          } else if (name === 'stock') {
+            finalValue = parseInt(value) || 0;
+          }
+
+          setCurrentProduct(prev => ({
+            ...prev,
+            [name]: finalValue
+          }));
+        };
+
+        const handleSubmit = async (e) => {
+          e.preventDefault();
+          if (!currentProduct.name || currentProduct.price === '' || currentProduct.cost === '') {
+            setPopupContent({ title: "ข้อผิดพลาด", message: "กรุณาใส่ชื่อสินค้า, ราคาขาย และราคาทุนให้ครบถ้วน" });
+            setShowPopup(true);
+            return;
+          }
+
+          const finalBarcode = (currentProduct.barcode || '').trim();
+
+          if (finalBarcode) {
+            const isBarcodeSameAsOtherProductId = products.some(p =>
+              String(p.id) === finalBarcode && p.id !== currentProduct.id
+            );
+            if (isBarcodeSameAsOtherProductId) {
+              setPopupContent({ title: "ข้อผิดพลาด", message: `รหัสบาร์โค้ด '${finalBarcode}' นี้ซ้ำกับรหัสสินค้าอัตโนมัติอื่น` });
+              setShowPopup(true);
+              return;
+            }
+            const isDuplicateCustomBarcode = products.some(p =>
+              p.barcode === finalBarcode && p.id !== currentProduct.id
+            );
+            if (isDuplicateCustomBarcode) {
+              setPopupContent({ title: "ข้อผิดพลาด", message: `รหัสบาร์โค้ด '${finalBarcode}' นี้มีสินค้าอื่นใช้แล้ว` });
+              setShowPopup(true);
+              return;
+            }
+          }
+
+          // บรรทัดที่ส่งข้อมูล (ในฟังก์ชันบันทึกสินค้า)
+          const productToSave = {
+            ...currentProduct,
+            price: parseFloat(currentProduct.price) || 0,
+            cost: parseFloat(currentProduct.cost) || 0,
+            stock: parseInt(currentProduct.stock) || 0,
+            location: currentProduct.location || "",
+            barcode: finalBarcode || undefined
+          };
+
+          try {
+            // 1. บันทึกข้อมูล
+            await putData(PRODUCT_STORE, productToSave, products);
+
+
+            // 3. ปิดโหมดแก้ไข
+            setIsEditing(false);
+
+            // 4. [หัวใจสำคัญ] บังคับให้หน้าปัจจุบันยังคงเป็น 'inventory'
+            // แม้จะโหลดข้อมูลใหม่ แต่เราสั่งล็อกให้มันยังอยู่ที่เดิม
+            setCurrentPage('inventory');
+
+            setPopupContent({
+              title: "สำเร็จ",
+              message: `บันทึกสินค้า "${currentProduct.name}" เรียบร้อยแล้ว`
+            });
+            setShowPopup(true);
+
+          } catch (e) {
+            console.error("Error saving product:", e);
+          }
+        };
+
+        const handleDelete = (id, name) => {
+          setPopupContent({
+            title: "ยืนยันการลบ",
+            message: `คุณต้องการลบสินค้า "${name}" หรือไม่?`,
+            actions: [
+              { label: "ยกเลิก", handler: () => { } },
+              {
+                label: "ลบ", primary: true, handler: async () => {
+                  await deleteData(PRODUCT_STORE, id);
+                  setPopupContent({ title: "สำเร็จ", message: `ลบสินค้า "${name}" เรียบร้อยแล้ว` });
+                  setShowPopup(true);
+                }
+              }
+            ]
+          });
+          setShowPopup(true);
+        };
+
+        const generateBarcode = async (product) => {
+          const barcodeValue = product.barcode ? String(product.barcode) : String(product.id);
+          try {
+            const pageWmm = 210; const pageHmm = 297; const margin = 10;
+            const cols = 7; const rows = 13; const total = cols * rows; const gutter = 2;
+            const cellWmm = (pageWmm - margin * 2 - gutter * (cols - 1)) / cols;
+            const cellHmm = (pageHmm - margin * 2 - gutter * (rows - 1)) / rows;
+            const scale = 4; const pxPerMm = 300 / 25.4;
+            const imgWpx = Math.round(cellWmm * 0.9 * pxPerMm * scale);
+            const imgHpx = Math.round(cellHmm * 0.7 * pxPerMm * scale);
+            const canvas = document.createElement('canvas');
+            canvas.width = imgWpx; canvas.height = imgHpx;
+            const moduleWidth = Math.max(0.2, imgWpx / 100 / scale);
+
+            JsBarcode(canvas, barcodeValue, {
+              format: "CODE128", width: moduleWidth, height: imgHpx,
+              displayValue: false, margin: 0, background: "#ffffff"
+            });
+
+            const barcodeUrl = canvas.toDataURL('image/png', 1.0);
+            const container = document.createElement('div');
+            container.style.width = `${pageWmm}mm`; container.style.height = `${pageHmm}mm`;
+            container.style.padding = `${margin}mm`; container.style.display = 'grid';
+            container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`; container.style.gap = `${gutter}mm`;
+            container.style.background = '#fff'; container.style.boxSizing = 'border-box';
+
+            for (let i = 0; i < total; i++) {
+              const cell = document.createElement('div');
+              cell.style.border = '0.1mm solid rgba(0,0,0,0.1)'; cell.style.padding = '1mm';
+              cell.style.display = 'flex'; cell.style.flexDirection = 'column';
+              cell.style.alignItems = 'center'; cell.style.justifyContent = 'flex-start';
+              cell.style.height = `${cellHmm - 2}mm`;
+
+              const img = document.createElement('img');
+              img.src = barcodeUrl; img.style.width = '100%'; img.style.height = 'auto';
+              img.style.maxHeight = '70%'; img.style.marginTop = '0.5mm';
+
+              const text = document.createElement('div');
+              text.textContent = `${product.name} ${formatCurrency(product.price)}`;
+              text.style.fontSize = '6pt'; text.style.marginTop = '0.8mm';
+              text.style.textAlign = 'center'; text.style.width = '100%';
+              text.style.overflow = 'hidden'; text.style.textOverflow = 'ellipsis';
+              text.style.whiteSpace = 'nowrap';
+
+              cell.appendChild(img); cell.appendChild(text);
+              container.appendChild(cell);
+            }
+            document.body.appendChild(container);
+            const opt = {
+              margin: [0, 0, 0, 0], filename: `barcode_${product.id}.pdf`,
+              image: { type: 'jpeg', quality: 1.0 },
+              html2canvas: { scale: 3, useCORS: true, scrollY: 0, y: 0 },
+              jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+            await html2pdf().from(container).set(opt).save();
+            setTimeout(() => document.body.removeChild(container), 1000);
+          } catch (error) {
+            console.error("Error generating barcode:", error);
+          }
+        };
+
+        if (isEditing) {
+          return (
+            <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+              <Header title={currentProduct.id ? "✏️ แก้ไขสินค้า" : "➕ เพิ่มสินค้าใหม่"} />
+              <div className="max-w-xl mx-auto mt-6 p-6 bg-white rounded-xl shadow-lg">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อสินค้า</label>
+                    <input type="text" name="name" value={currentProduct.name} onChange={handleChange} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ราคาขาย</label>
+                      <input type="number" name="price" value={currentProduct.price} onChange={handleChange} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" min="0" step="0.01" required />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ราคาทุน</label>
+                      <input type="number" name="cost" value={currentProduct.cost} onChange={handleChange} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" min="0" step="0.01" required />
+                    </div>
+                  </div>
+
+                  {/* [เพิ่มส่วนจำนวนสต็อก] */}
+                  <div>
+                    <label className="block text-sm font-bold text-grey-600 mb-1">📦 จำนวนคงเหลือในสต็อก</label>
+                    <input type="number" name="stock" value={currentProduct.stock} onChange={handleChange} className="w-full p-3 border-2 border-blue-200 rounded-lg focus:ring-blue-500 focus:border-blue-500 font-bold" min="0" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">ที่เก็บสินค้า (ชั้น/โซน)</label>
+                    <input
+                      type="text"
+                      className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="เช่น ชั้น A1, โซนหลังร้าน"
+                      value={currentProduct.location || ''}
+                      onChange={(e) => setCurrentProduct({ ...currentProduct, location: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">รหัสบาร์โค้ด</label>
+                    <input type="text" name="barcode" placeholder="เว้นว่างเพื่อใช้รหัสอัตโนมัติ" value={currentProduct.barcode || ''} onChange={handleChange} className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" />
+                  </div>
+
+                  <div className="flex justify-end space-x-3 pt-4">
+                    <button type="button" onClick={() => setIsEditing(false)} className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition duration-150">ยกเลิก</button>
+                    <button type="submit" className="px-6 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition duration-150 shadow-md">บันทึกสินค้า</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+            <Header title="📦 จัดการสินค้า" />
+            <div className="mt-6 flex flex-col sm:flex-row justify-between items-center mb-4 space-y-3 sm:space-y-0">
+              <input type="text" placeholder="🔍 ค้นหาสินค้า..." value={filterText} onChange={handleFilterChange} className="w-full sm:w-80 p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500" />
+              <div className="text-sm text-gray-600">แสดง {currentProducts.length} จาก {filteredProducts.length} รายการ</div>
+              <div className="flex items-center space-x-2">
+                <label className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg cursor-pointer hover:bg-gray-300 text-sm">
+                  นำเข้า CSV <input type="file" accept=".csv" onChange={(e) => handleImportFile(e.target.files ? e.target.files[0] : null)} className="hidden" />
+                </label>
+                <button onClick={exportProductsCSV} className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 text-sm">ส่งออก Excel</button>
+                <button onClick={handleNew} className="flex items-center px-4 py-2 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 shadow-md text-sm">เพิ่มสินค้าใหม่</button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-lg overflow-x-auto border border-gray-100">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-green-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-green-700 uppercase">ชื่อสินค้า</th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-blue-600 uppercase">สต็อกคงเหลือ</th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-green-700 uppercase">ราคาขาย</th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-green-700 uppercase">ราคาทุน</th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-green-700 uppercase">กำไรต่อชิ้น</th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-green-700 uppercase">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {currentProducts.map((product) => (
+                    <tr key={product.id} className="hover:bg-green-50 transition duration-100">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{product.name}</td>
+                      <td className="px-6 py-4">
+                        {/* ใช้ชื่อตัวแปรให้ตรงกับข้างบน คือ product */}
+                        <span className={`font-bold ${product.stock <= 5 ? 'text-red-600' : 'text-blue-600'}`}>
+                          {product.stock}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{formatCurrency(product.price)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{displayMaybeMasked(product.cost, true)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">{displayMaybeMasked(product.price - product.cost, true)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                        <button
+                          onClick={() => generateBarcode(product)}
+                          className="text-blue-600 hover:text-blue-800 p-1 rounded-full hover:bg-blue-100 transition"
+                          title="สร้างบาร์โค้ด"
+                          aria-label="Generate Barcode"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h.75v.75h-.75v-.75ZM13.5 19.5h.75v.75h-.75v-.75ZM19.5 13.5h.75v.75h-.75v-.75ZM19.5 19.5h.75v.75h-.75v-.75ZM16.5 16.5h.75v.75h-.75v-.75Z" />
+                          </svg>
+
+                        </button>
+                        <button
+                          onClick={() => handleEditProductClick(product)}
+                          className="text-green-600 hover:text-green-800 p-1 rounded-full hover:bg-green-100 transition"
+                          aria-label="Edit"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-7-7l-4 4-2 2v2h2l2-2 4-4m-7-7l4-4 2 2" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(product.id, product.name)}
+                          className="text-red-600 hover:text-red-800 p-1 rounded-full hover:bg-red-100 transition"
+                          aria-label="Delete"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {currentProducts.length === 0 && (
+                <div className="p-6 text-center text-gray-500">
+                  ไม่พบสินค้าในระบบ
+                </div>
+              )}
+            </div>
+
+            {/* แสดง Pagination ถ้ามีมากกว่า 1 หน้า */}
+            {totalPages > 1 && <Pagination />}
+          </div>
+        );
+      };
+
+      // --- 9. Add Bill View ---
+
+      const AddBillView = () => {
+        // เพิ่ม state สำหรับการรับเงินและทอนเงิน
+        const [amountReceived, setAmountReceived] = useState('');
+        const [skipChange, setSkipChange] = useState(false);
+        const [customer, setCustomer] = useState(() => localStorage.getItem('pending_bill_customer') || '');
+        const [customerDetails, setCustomerDetails] = useState(() => localStorage.getItem('pending_bill_details') || '');
+        const [billItems, setBillItems] = useState(() => {
+          const saved = localStorage.getItem('pending_bill_items');
+          return saved ? JSON.parse(saved) : [];
+        });
+        const [searchTerm, setSearchTerm] = useState('');
+        const [currentBillId, setCurrentBillId] = useState(null);
+        const [isSubmitting, setIsSubmitting] = useState(false);
+        const [isCreatingBill, setIsCreatingBill] = useState(true); // เพิ่มสถานะว่ากำลังสร้างบิลอยู่const thaiToEng = (text) => {
+        const [promotions, setPromotions] = React.useState([]);
+
+        useEffect(() => {
+          localStorage.setItem('pending_bill_items', JSON.stringify(billItems));
+          localStorage.setItem('pending_bill_customer', customer);
+          localStorage.setItem('pending_bill_details', customerDetails);
+        }, [billItems, customer, customerDetails]);
+
+        useEffect(() => {
+          const fetchPromos = async () => {
+            const data = await getAll('promotions');
+            setPromotions(data || []);
+          };
+          fetchPromos();
+        }, []);
+
+        const clearDraft = () => {
+          localStorage.removeItem('pending_bill_items');
+          localStorage.removeItem('pending_bill_customer');
+          localStorage.removeItem('pending_bill_details');
+          setBillItems([]);
+          setCustomer('');
+          setCustomerDetails('');
+        };
+
+        // Calculate Totals
+        React.useEffect(() => {
+          const loadPromos = async () => {
+            const data = await getAll('promotions');
+            setPromotions(data || []);
+          };
+          loadPromos();
+        }, []);
+
+        // คำนวณราคาทั้งหมด (Subtotal, Discount, Total)
+        const { subTotal, totalDiscount, totalSale, appliedPromotions } = React.useMemo(() => {
+          // ราคารวมก่อนหักส่วนลด
+          let sub = billItems.reduce((acc, item) => acc + (item.price * item.qty), 0);
+          let discounts = [];
+
+          promotions.forEach(promo => {
+            if (promo.type === 'qty') {
+              const item = billItems.find(i => i.productId === promo.items[0]?.id);
+              if (item && item.qty >= promo.minQty) {
+                const sets = Math.floor(item.qty / promo.minQty);
+                const savings = ((item.price * promo.minQty) - promo.discountPrice) * sets;
+                if (savings > 0) discounts.push({ name: promo.name, amount: savings });
+              }
+            } else if (promo.type === 'bundle') {
+              const itemA = billItems.find(i => i.productId === promo.items[0]?.id);
+              const itemB = billItems.find(i => i.productId === promo.items[1]?.id);
+              if (itemA && itemB) {
+                const sets = Math.min(itemA.qty, itemB.qty);
+                const savings = ((itemA.price + itemB.price) - promo.discountPrice) * sets;
+                if (savings > 0) discounts.push({ name: promo.name, amount: savings });
+              }
+            }
+          });
+
+          const totalDisc = discounts.reduce((acc, d) => acc + d.amount, 0);
+          return {
+            subTotal: sub,
+            totalDiscount: totalDisc,
+            totalSale: sub - totalDisc,
+            appliedPromotions: discounts
+          };
+        }, [billItems, promotions]);
+
+        // Product Search Logic
+        const searchResults = useMemo(() => {
+          if (!searchTerm) return [];
+
+          // 1. เตรียมคำค้นหา: ลบเว้นวรรคออกทั้งหมด และทำเป็นตัวเล็ก
+          // ใช้ .trim() ก่อนแล้วค่อย replace ช่องว่างข้างใน
+          const cleanSearch = searchTerm.trim().replace(/\s+/g, '').toLowerCase();
+
+          return products
+            .filter(p => {
+              // ป้องกัน Error กรณี p.name เป็นค่าว่าง
+              if (!p.name) return false;
+
+              // 2. เตรียมชื่อสินค้า: ลบเว้นวรรคออกทั้งหมด และทำเป็นตัวเล็ก
+              const cleanName = String(p.name).replace(/\s+/g, '').toLowerCase();
+
+              // 3. เตรียมบาร์โค้ด (ถ้ามี): ลบเว้นวรรคออก
+              const cleanBarcode = String(p.barcode || '').replace(/\s+/g, '').toLowerCase();
+
+              // ตรวจสอบว่าคำค้นหามีอยู่ในชื่อ หรือ บาร์โค้ด หรือไม่
+              return cleanName.includes(cleanSearch) || cleanBarcode.includes(cleanSearch);
+            })
+            // กรองสินค้าที่สต็อกเป็น 0 หรือติดลบออก
+            .filter(p => (Number(p.stock) || 0) > 0)
+            // เช็คไม่ให้ซ้ำกับสินค้าที่เลือกไปแล้ว (ตรวจสอบ ID ให้ตรงกัน)
+            .filter(p => !billItems.some(item => String(item.id) === String(p.id)))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'th'));
+        }, [searchTerm, products, billItems]);
+
+        const addItemToBill = (product) => {
+          setBillItems(prev => {
+            // Ensure product is not already added (should be filtered by searchResults, but good safeguard)
+            if (prev.find(item => item.productId === product.id)) return prev;
+
+            return [...prev, {
+              productId: product.id,
+              name: product.name,
+              price: product.price,
+              cost: product.cost,
+              qty: 1 // Start with quantity 1
+            }];
+          });
+          setSearchTerm(''); // Clear search after adding
+        };
+
+        // [NEW] Allows manual input, prevents quantity < 1 (for AddBillView)
+        const updateItemQtyManual = (productId, newQty) => {
+          const qty = parseInt(newQty);
+          const product = products.find(p => p.id === productId);
+          const maxStock = product ? (product.stock || 0) : 0;
+
+          setBillItems(prev => prev.map(item => {
+            if (item.productId === productId) {
+              let finalQty = isNaN(qty) || qty <= 0 ? 1 : qty;
+              if (finalQty > maxStock) {
+                setPopupContent({
+                  title: "จำนวนเกินสต็อก",
+                  message: `สต็อกสินค้า "${item.name}" มีจำกัดเพียง ${maxStock} ชิ้น`
+                });
+                setShowPopup(true);
+                finalQty = maxStock;
+              }
+              return { ...item, qty: finalQty };
+            }
+            return item;
+          }));
+        };
+
+        const updateItemQty = (productId, delta) => {
+          setBillItems(prev => prev.map(item => {
+            if (item.productId === productId) {
+              const product = products.find(p => p.id === productId);
+              const maxStock = product ? (product.stock || 0) : 0;
+              const newQty = item.qty + delta;
+
+              if (newQty > maxStock) {
+                setPopupContent({
+                  title: "สินค้าไม่พอ",
+                  message: `ขออภัย สินค้า "${item.name}" ในสต็อกเหลือเพียง ${maxStock} ชิ้น`
+                });
+                setShowPopup(true);
+                return { ...item, qty: maxStock };
+              }
+              return { ...item, qty: newQty < 1 ? 1 : newQty };
+            }
+            return item;
+          }));
+        };
+
+        const removeItem = (productId) => {
+          setBillItems(prev => prev.filter(item => item.productId !== productId));
+        };
+
+        const handleSaveBill = async () => {
+          if (billItems.length === 0) return;
+          setIsSubmitting(true);
+
+          // 1. คำนวณยอดรวมสินค้าแบบเต็ม (Subtotal)
+          const subTotal = billItems.reduce((sum, item) => sum + (Number(item.price) * Number(item.qty)), 0);
+
+          // 2. ดึงค่าส่วนลดจากตัวแปรหน้าจอ (สมมติว่าคุณมีตัวแปร totalDiscount ที่คำนวณโปรโมชั่นไว้แล้ว)
+          const discountAmount = typeof totalDiscount !== 'undefined' ? totalDiscount : 0;
+
+          // 3. คำนวณยอดขายจริงที่หักส่วนลดแล้ว (นี่คือยอดที่ต้องบันทึกลง DB)
+          const finalTotalSale = subTotal - discountAmount;
+
+          // 4. คำนวณต้นทุนรวม
+          const totalCost = billItems.reduce((sum, item) => sum + (Number(item.cost || 0) * Number(item.qty)), 0);
+
+          // 5. คำนวณกำไรสุทธิ (จากยอดที่ลดแล้ว)
+          const totalProfit = finalTotalSale - totalCost;
+
+          const finalBill = {
+            date: new Date().toISOString(),
+            customer,
+            customerDetails,
+            items: billItems,
+            appliedPromotions,
+            totalSale: finalTotalSale, // <--- แก้เป็นยอดที่หักส่วนลดแล้ว
+            totalCost,
+            totalProfit,
+            status: 'completed'
+          };
+
+          try {
+            const savedId = await putData(BILL_STORE, finalBill);
+
+            // 1. ตัดสต็อกสินค้า
+            for (const item of billItems) {
+              const product = products.find(p => p.id === item.productId);
+              if (product) {
+                await putData(PRODUCT_STORE, {
+                  ...product,
+                  stock: (product.stock || 0) - item.qty
+                });
+              }
+            }
+
+
+            // 3. ล้างข้อมูลที่เซฟสำรองไว้
+            localStorage.removeItem('pending_bill_items');
+            localStorage.removeItem('pending_bill_customer');
+            localStorage.removeItem('pending_bill_details');
+            setBillItems([]);
+            setCustomer('');
+            setCustomerDetails('');
+
+            setIsSubmitting(false);
+            setIsCreatingBill(false);
+
+            // 4. แสดง Popup สำเร็จ
+            setPopupContent({
+              title: "บันทึกบิลสำเร็จ",
+              message: `บันทึกบิลเลขที่ ${savedId} เรียบร้อยแล้ว`,
+              actions: [
+                {
+                  label: "ปิดหน้าต่าง",
+                  handler: () => {
+                    setShowPopup(false);
+                    navigateTo('dashboard');
+                  }
+                },
+                {
+                  label: "🖨️ พิมพ์บิล",
+                  primary: true,
+                  handler: () => {
+                    const billToPrint = { ...finalBill, id: savedId };
+                    handlePrintBill(billToPrint);
+                    setShowPopup(false);
+                    navigateTo('dashboard');
+                  }
+                }
+              ]
+            });
+            setShowPopup(true);
+
+          } catch (e) {
+            console.error("Save error:", e);
+            setIsSubmitting(false);
+            setPopupContent({
+              title: "ข้อผิดพลาด",
+              message: "ไม่สามารถบันทึกบิลได้ กรุณาตรวจสอบ Console Log"
+            });
+            setShowPopup(true);
+          }
+        };
+
+        // เพิ่ม hook สำหรับจัดการการแสกนบาร์โค้ด
+        const useBarcodeScan = (onScan, isEnabled = true) => {
+          const [barcodeBuffer, setBarcodeBuffer] = useState('');
+          const [lastScanTime, setLastScanTime] = useState(0);
+
+          useEffect(() => {
+            if (!isEnabled) return;
+
+            const handleKeyPress = (e) => {
+              const currentTime = new Date().getTime();
+
+              // ถ้าเวลาระหว่างการกดปุ่มห่างกันเกิน 100ms ให้เริ่มบันทึกใหม่
+              if (currentTime - lastScanTime > 100) {
+                setBarcodeBuffer('');
+              }
+              setLastScanTime(currentTime);
+
+              // เก็บตัวอักษรที่กดเข้า buffer
+              if (e.key !== 'Enter') {
+                setBarcodeBuffer(prev => prev + e.key);
+              } else {
+                // *** [FIX] ป้องกันไม่ให้ Enter ไปกดปุ่มอื่นใน DOM ***
+                e.preventDefault();
+                e.stopPropagation();
+                // ************************************************
+                // เมื่อกด Enter ให้ส่งค่าไปยัง callback
+                if (barcodeBuffer) {
+                  onScan(barcodeBuffer);
+                  setBarcodeBuffer('');
+                }
+              }
+            };
+
+            window.addEventListener('keypress', handleKeyPress);
+            return () => window.removeEventListener('keypress', handleKeyPress);
+          }, [barcodeBuffer, lastScanTime, onScan, isEnabled]);
+        };
+
+
+
+        // เพิ่มฟังก์ชันจัดการบาร์โค้ด
+        const handleBarcodeScan = useCallback((barcode) => {
+          const engBarcode = translateBarcode(barcode);
+          console.log("raw:", barcode);
+          console.log("eng:", engBarcode);
+          // หาสินค้าจากบาร์โค้ด (ID)
+          const product = products.find(p => {
+            const customBarcode = p.barcode ? String(p.barcode).toLowerCase() : null; // ทำให้เป็นตัวพิมพ์เล็กเสมอ
+            const systemId = String(p.id);
+
+            // 1. ค้นหาจากรหัสบาร์โค้ดที่ตั้งเอง (ตัวพิมพ์เล็ก)
+            const isMatchCustom = customBarcode && customBarcode === engBarcode;
+            // 2. ค้นหาจาก ID สินค้าอัตโนมัติ (Fallback)
+            const isMatchSystem = systemId === engBarcode;
+
+            return isMatchCustom || isMatchSystem;
+          });
+          if (!product) {
+            setPopupContent({
+              title: "ไม่พบสินค้า",
+              message: `ไม่พบสินค้าที่มีรหัสบาร์โค้ด: ${barcode}`
+            });
+            setShowPopup(true);
+            setSearchTerm('');
+            return;
+          }
+
+          // เพิ่มสินค้าลงในบิล หรือเพิ่มจำนวนถ้ามีอยู่แล้ว
+          setBillItems(prev => {
+            const existingItem = prev.find(item => item.productId === product.id);
+            if (existingItem) {
+              const nextQty = existingItem.qty + 1;
+
+              // ตรวจสอบสต็อก: ถ้าจำนวนถัดไปเกินสต็อกที่มี
+              if (nextQty > (product.stock || 0)) {
+                setPopupContent({
+                  title: "สินค้าในสต็อกไม่พอ",
+                  message: `ไม่สามารถเพิ่ม "${product.name}" ได้แล้ว เนื่องจากในสต็อกมีเพียง ${product.stock} ชิ้น`
+                });
+                setShowPopup(true);
+                return prev;
+              }
+
+              return prev.map(item =>
+                item.productId === product.id
+                  ? { ...item, qty: nextQty }
+                  : item
+              );
+            }
+
+            if ((product.stock || 0) <= 0) {
+              setPopupContent({
+                title: "สินค้าหมด",
+                message: `ไม่สามารถเพิ่ม "${product.name}" ได้เนื่องจากไม่มีสินค้าในสต็อก`
+              });
+              setShowPopup(true);
+              return prev;
+            }
+
+            return [...prev, {
+              productId: product.id,
+              name: product.name,
+              price: product.price,
+              cost: product.cost,
+              qty: 1
+            }];
+          });
+        }, [products, isCreatingBill]);
+
+        useBarcodeScan(handleBarcodeScan, true);
+
+        return (
+          <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+            <Header title="🧾 สร้างบิลใหม่" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+              {/* Left Column: Inputs & Search */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="bg-white p-6 rounded-xl shadow-lg space-y-4">
+                  <h3 className="text-lg font-bold text-green-700">ข้อมูลลูกค้า / ช่าง</h3>
+                  <input
+                    type="text"
+                    placeholder="ชื่อลูกค้า / ชื่อช่าง (ไม่บังคับ)"
+                    value={customer}
+                    onChange={(e) => setCustomer(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="รายละเอียดลูกค้า (ไม่บังคับ)"
+                    value={customerDetails}
+                    onChange={(e) => setCustomerDetails(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                  />
+
+                  <h3 className="text-lg font-bold text-green-700 pt-4">🔍 ค้นหาสินค้าเพื่อเพิ่มในบิล</h3>
+                  <input
+                    type="text"
+                    placeholder="พิมพ์ชื่อสินค้า..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                  />
+
+                  {/* Search Results Dropdown */}
+                  {searchTerm && searchResults.length > 0 && (
+                    <div className="bg-white border border-green-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                      {searchResults.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => addItemToBill(p)}
+                          className="flex justify-between items-center p-3 cursor-pointer hover:bg-green-100 transition duration-100 border-b last:border-b-0"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium text-gray-800">{p.name}</span>
+                            {/* [แก้ไข] แสดงสีตามเงื่อนไข: <= 5 สีแดง, > 5 สีน้ำเงิน */}
+                            <span className={`text-sm font-semibold ${p.stock <= 5 ? 'text-red-600' : 'text-blue-600'}`}>
+                              คงเหลือ: {p.stock || 0} {p.unit || 'ชิ้น'}
+                            </span>
+                          </div>
+                          <span className="text-sm font-semibold text-green-600">{formatCurrency(p.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Bill Items List */}
+                <div className="bg-white p-6 rounded-xl shadow-lg">
+                  <h3 className="text-xl font-bold text-green-700 mb-4 border-b pb-2">รายการสินค้าในบิล ({billItems.length} รายการ)</h3>
+                  <div className="space-y-3">
+                    {billItems.length === 0 ? (
+                      <p className="text-gray-500 text-center">กรุณาเพิ่มสินค้าจากช่องค้นหาด้านบน</p>
+                    ) : (
+                      billItems.map(item => (
+                        <div key={item.productId} className="flex items-center justify-between p-3 border border-green-100 rounded-lg bg-green-50">
+                          {/* Item Name & Price */}
+                          <div className="flex-1 min-w-0 pr-3">
+                            <p className="font-semibold text-gray-800 truncate">{item.name}</p>
+                            <p className="text-xs text-gray-500">@{formatCurrency(item.price)}</p>
+                          </div>
+
+                          {/* Quantity Control */}
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => updateItemQty(item.productId, -1)}
+                              className="p-1 w-8 h-8 flex items-center justify-center bg-gray-200 rounded-full text-gray-700 hover:bg-gray-300 transition"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
+                            </button>
+                            {/* ปรับปรุง: ใช้ input แทน span เพื่อให้แก้ไขจำนวนด้วยมือได้ */}
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.qty}
+                              onChange={(e) => updateItemQtyManual(item.productId, e.target.value)}
+                              className="font-bold text-gray-900 w-12 text-center p-1 border rounded-md"
+                            />
+                            <button
+                              onClick={() => updateItemQty(item.productId, 1)}
+                              className="p-1 w-8 h-8 flex items-center justify-center bg-green-400 text-white rounded-full hover:bg-green-500 transition"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                          </div>
+
+                          {/* Total & Remove */}
+                          <div className="ml-4 w-24 text-right">
+                            <p className="font-bold text-green-700">{formatCurrency(item.price * item.qty)}</p>
+                          </div>
+                          <button
+                            onClick={() => removeItem(item.productId)}
+                            className="ml-3 text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition"
+                            aria-label="Remove Item"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Summary & Action */}
+              <div className="lg:col-span-1">
+                <div className="sticky top-20 bg-green-700 text-white p-6 rounded-xl shadow-2xl space-y-4">
+                  <h3 className="text-2xl font-black mb-4 border-b border-green-500 pb-2 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                    สรุปยอดรวม
+                  </h3>
+
+                  {/* ยอดรวมก่อนหักส่วนลด */}
+                  <div className="flex justify-between items-center text-sm opacity-80">
+                    <span>ราคารวมสินค้า</span>
+                    <span>{formatCurrency(subTotal)}</span>
+                  </div>
+
+                  {/* รายการส่วนลดที่ได้รับ */}
+                  {totalDiscount > 0 && (
+                    <div className="space-y-1 py-3 border-y border-green-600 border-dashed">
+                      <div className="text-xs font-bold text-green-300 uppercase tracking-widest">ส่วนลดโปรโมชั่น:</div>
+                      {appliedPromotions.map((p, idx) => (
+                        <div key={idx} className="flex justify-between text-sm text-yellow-200 italic">
+                          <span>- {p.name}</span>
+                          <span>{formatCurrency(p.amount)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-bold text-yellow-300 pt-1 border-t border-green-800">
+                        <span>รวมส่วนลดทั้งหมด</span>
+                        <span>- {formatCurrency(totalDiscount)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ยอดสุทธิที่ลูกค้าต้องจ่าย */}
+                  <div className="flex justify-between items-center text-xl font-black pt-2">
+                    <span className="text-green-200">ยอดสุทธิ</span>
+                    <span className="text-3xl text-white drop-shadow-md">{formatCurrency(totalSale)}</span>
+                  </div>
+
+                  {/* ส่วนรับเงิน */}
+                  <div className="mt-6 pt-4 border-t border-green-500">
+                    <label className="block text-sm font-medium mb-1 text-green-100">รับเงินมา</label>
+                    <input
+                      type="number"
+                      value={amountReceived}
+                      onChange={(e) => setAmountReceived(e.target.value)}
+                      className="w-full p-3 bg-white text-gray-900 rounded-lg font-bold text-xl focus:ring-4 focus:ring-yellow-400 outline-none transition-all"
+                      placeholder="ยอดเงินจากลูกค้า"
+                      disabled={skipChange}
+                    />
+                  </div>
+
+                  {/* แสดงเงินทอน */}
+                  <div className="flex justify-between items-center text-lg bg-green-800 p-4 rounded-xl border border-green-600">
+                    <span>เงินทอน</span>
+                    <span className="text-yellow-300 font-black text-3xl">
+                      {formatCurrency(Math.max(0, parseFloat(amountReceived || '0') - totalSale))}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={handleSaveBill}
+                    disabled={isSubmitting || billItems.length === 0}
+                    className="w-full mt-4 py-5 bg-yellow-400 text-green-900 rounded-xl font-black text-xl hover:bg-yellow-300 active:scale-95 transition-all shadow-xl disabled:bg-gray-400 disabled:text-gray-200 flex items-center justify-center border-b-4 border-yellow-600"
+                  >
+                    {isSubmitting ? (
+                      <div className="flex items-center gap-2">
+                        <svg className="animate-spin h-6 w-6 text-green-900" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        กำลังบันทึก...
+                      </div>
+                    ) : (
+                      <span>💾 บันทึก & พิมพ์บิล</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // --- 9.5. Edit Bill View (New Component) ---
+
+      const EditBillView = () => {
+        const billToEdit = bills.find(b => b.id === currentBillId);
+
+        // ถ้าไม่พบบิล ให้กลับไปหน้า dashboard
+        if (!billToEdit) {
+          navigateTo('dashboard');
+          return null;
+        }
+
+        const [amountReceived, setAmountReceived] = useState('');
+        const [skipChange, setSkipChange] = useState(false);
+        const [customer, setCustomer] = useState(() =>
+          localStorage.getItem(`edit_bill_customer_${currentBillId}`) || billToEdit.customer || ''
+        );
+        const [customerDetails, setCustomerDetails] = useState(() =>
+          localStorage.getItem(`edit_bill_details_${currentBillId}`) || billToEdit.customerDetails || ''
+        );
+        const [billItems, setBillItems] = useState(() => {
+          const saved = localStorage.getItem(`edit_bill_items_${currentBillId}`);
+          return saved ? JSON.parse(saved) : (billToEdit.items || []);
+        });
+        const [searchTerm, setSearchTerm] = useState('');
+        const [isSubmitting, setIsSubmitting] = useState(false);
+        const [promotions, setPromotions] = React.useState([]);
+
+        useEffect(() => {
+          if (currentBillId) {
+            localStorage.setItem(`edit_bill_items_${currentBillId}`, JSON.stringify(billItems));
+            localStorage.setItem(`edit_bill_customer_${currentBillId}`, customer);
+            localStorage.setItem(`edit_bill_details_${currentBillId}`, customerDetails);
+          }
+        }, [billItems, customer, customerDetails, currentBillId]);
+
+        useEffect(() => {
+          const fetchPromos = async () => {
+            const data = await getAll('promotions');
+            setPromotions(data || []);
+          };
+          fetchPromos();
+        }, []);
+
+        const clearDraft = () => {
+          localStorage.removeItem('pending_bill_items');
+          localStorage.removeItem('pending_bill_customer');
+          localStorage.removeItem('pending_bill_details');
+          setBillItems([]);
+          setCustomer('');
+          setCustomerDetails('');
+        };
+
+        // คำนวณยอดรวม
+
+        // โหลดโปรโมชั่นมาเตรียมคำนวณ
+        React.useEffect(() => {
+          const loadPromos = async () => {
+            const data = await getAll('promotions');
+            setPromotions(data || []);
+          };
+          loadPromos();
+        }, []);
+
+        // คำนวณยอดสรุปทั้งหมด
+        const { subTotal, totalDiscount, totalSale, appliedPromotions } = React.useMemo(() => {
+          // 1. ยอดรวมก่อนหักส่วนลด
+          let sub = billItems.reduce((acc, item) => acc + (item.price * item.qty), 0);
+          let discounts = [];
+
+          // 2. คำนวณส่วนลดตามโปรโมชั่น ก-ฮ ที่สร้างไว้
+          promotions.forEach(promo => {
+            if (promo.type === 'qty') {
+              const item = billItems.find(i => i.productId === promo.items[0]?.id);
+              if (item && item.qty >= promo.minQty) {
+                const sets = Math.floor(item.qty / promo.minQty);
+                const savings = ((item.price * promo.minQty) - promo.discountPrice) * sets;
+                if (savings > 0) discounts.push({ name: promo.name, amount: savings });
+              }
+            } else if (promo.type === 'bundle') {
+              const itemA = billItems.find(i => i.productId === promo.items[0]?.id);
+              const itemB = billItems.find(i => i.productId === promo.items[1]?.id);
+              if (itemA && itemB) {
+                const sets = Math.min(itemA.qty, itemB.qty);
+                const savings = ((itemA.price + itemB.price) - promo.discountPrice) * sets;
+                if (savings > 0) discounts.push({ name: promo.name, amount: savings });
+              }
+            }
+          });
+
+          const totalDisc = discounts.reduce((acc, d) => acc + d.amount, 0);
+          return {
+            subTotal: sub,
+            totalDiscount: totalDisc,
+            totalSale: sub - totalDisc,
+            appliedPromotions: discounts
+          };
+        }, [billItems, promotions]);
+
+        // ค้นหาสินค้า
+        const searchResults = useMemo(() => {
+          if (!searchTerm) return [];
+
+          // 1. ลบเว้นวรรคออกจากคำค้นหาและทำเป็นตัวเล็ก
+          const cleanSearch = searchTerm.replace(/\s+/g, '').toLowerCase();
+
+          return products
+            .filter(p => {
+              // 2. ลบเว้นวรรคออกจากชื่อสินค้าที่จะเทียบ
+              const cleanName = (p.name || '').replace(/\s+/g, '').toLowerCase();
+              // คืนค่า true ถ้าชื่อสินค้าที่ลบเว้นวรรคแล้ว มีคำค้นหาอยู่ในนั้น
+              return cleanName.includes(cleanSearch);
+            })
+            // กรองสินค้าที่สต็อกเป็น 0 หรือติดลบออก
+            .filter(p => (p.stock || 0) > 0)
+            // เช็คไม่ให้ซ้ำกับสินค้าที่เลือกไปแล้ว (ตรวจสอบ ID ให้ตรงกัน)
+            .filter(p => !billItems.some(item => Number(item.id) === Number(p.id)))
+            .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+        }, [searchTerm, products, billItems]);
+
+        // เพิ่มสินค้าในบิล
+        const addItemToBill = (product) => {
+          setBillItems(prev => {
+            if (prev.find(item => item.productId === product.id)) return prev;
+            return [...prev, {
+              productId: product.id,
+              name: product.name,
+              price: product.price,
+              cost: product.cost,
+              qty: 1
+            }];
+          });
+          setSearchTerm('');
+        };
+
+        // อัพเดทจำนวนสินค้าด้วยการพิมพ์
+        const updateItemQtyManual = (productId, newQty) => {
+          const qty = parseInt(newQty);
+          const product = products.find(p => p.id === productId);
+          const maxStock = product ? (product.stock || 0) : 0;
+
+          setBillItems(prev => prev.map(item => {
+            if (item.productId === productId) {
+              let finalQty = isNaN(qty) || qty <= 0 ? 1 : qty;
+              if (finalQty > maxStock) {
+                setPopupContent({
+                  title: "จำนวนเกินสต็อก",
+                  message: `สต็อกสินค้า "${item.name}" มีจำกัดเพียง ${maxStock} ชิ้น`
+                });
+                setShowPopup(true);
+                finalQty = maxStock;
+              }
+              return { ...item, qty: finalQty };
+            }
+            return item;
+          }));
+        };
+        // อัพเดทจำนวนสินค้าด้วยปุ่ม +/-
+        const updateItemQty = (productId, delta) => {
+          setBillItems(prev => prev.map(item => {
+            if (item.productId === productId) {
+              const product = products.find(p => p.id === productId);
+
+              // ดึงค่าจำนวนเดิมในบิลนี้ (ถ้ามี)
+              const originalItem = billToEdit.items.find(i => i.productId === productId);
+              const originalQty = originalItem ? originalItem.qty : 0;
+
+              // สต็อกที่แท้จริงที่ยอมให้ใช้ได้ = สต็อกในคลัง + จำนวนที่บิลนี้ถือไว้
+              const maxStock = (product ? product.stock : 0) + originalQty;
+
+              const newQty = item.qty + delta;
+
+              if (newQty > maxStock) {
+                setPopupContent({
+                  title: "สินค้าไม่พอ",
+                  message: `ขออภัย สินค้า "${item.name}" ในสต็อกเหลือเพียง ${maxStock} ชิ้น`
+                });
+                setShowPopup(true);
+                return { ...item, qty: maxStock };
+              }
+              return { ...item, qty: newQty < 1 ? 1 : newQty };
+            }
+            return item;
+          }));
+        };
+
+        // ลบสินค้าออกจากบิล
+        const removeItem = (productId) => {
+          setBillItems(prev => prev.filter(item => item.productId !== productId));
+        };
+
+        // บันทึกการแก้ไขบิล
+        const handleSaveBill = async () => {
+          if (billItems.length === 0) {
+            setPopupContent({ title: "ข้อผิดพลาด", message: "กรุณาเพิ่มสินค้าในบิลก่อน" });
+            setShowPopup(true);
+            return;
+          }
+
+          setIsSubmitting(true);
+          try {
+            // 1. ดึงข้อมูลบิลเดิมจากฐานข้อมูลเพื่อตรวจสอบจำนวนสินค้าก่อนหน้า
+            const oldBill = bills.find(b => b.id === currentBillId);
+
+            // 2. คืนสต็อกสินค้าเดิมทั้งหมดในบิลนี้ก่อน
+            if (oldBill && oldBill.items) {
+              for (const oldItem of oldBill.items) {
+                const product = products.find(p => p.id === oldItem.productId);
+                if (product) {
+                  product.stock = (product.stock || 0) + (oldItem.qty || 0);
+                  await putData(PRODUCT_STORE, product); // อัปเดตสต็อกคืนเข้าไประบบ
+                }
+              }
+            }
+
+            // 3. หักสต็อกสินค้าตามรายการใหม่ที่แก้ไขแล้ว
+            for (const newItem of billItems) {
+              const product = products.find(p => p.id === newItem.productId);
+              if (product) {
+                product.stock = (product.stock || 0) - (newItem.qty || 0);
+                await putData(PRODUCT_STORE, product); // อัปเดตหักสต็อกใหม่ออก
+              }
+            }
+
+            const subTotal = billItems.reduce((sum, item) => sum + (Number(item.price) * Number(item.qty)), 0);
+
+            // 2. ดึงค่าส่วนลดจากตัวแปรหน้าจอ (สมมติว่าคุณมีตัวแปร totalDiscount ที่คำนวณโปรโมชั่นไว้แล้ว)
+            const discountAmount = typeof totalDiscount !== 'undefined' ? totalDiscount : 0;
+
+            // 3. คำนวณยอดขายจริงที่หักส่วนลดแล้ว (นี่คือยอดที่ต้องบันทึกลง DB)
+            const finalTotalSale = subTotal - discountAmount;
+
+            // 4. คำนวณต้นทุนรวม
+            const totalCost = billItems.reduce((sum, item) => sum + (Number(item.cost || 0) * Number(item.qty)), 0);
+
+            // 5. คำนวณกำไรสุทธิ (จากยอดที่ลดแล้ว)
+            const totalProfit = finalTotalSale - totalCost;
+
+            // 4. บันทึกข้อมูลบิลชุดใหม่ลงใน Database
+            const updatedBill = {
+              ...billToEdit,
+              customer,
+              customerDetails,
+              items: billItems,
+              totalSale: finalTotalSale,
+              totalCost,
+              totalProfit,
+              date: billToEdit.date // ใช้ค่าวันที่เดิม
+            };
+
+            await putData(BILL_STORE, updatedBill);
+
+            // ล้างข้อมูลร่างหลังเซฟสำเร็จ
+            localStorage.removeItem(`edit_bill_items_${currentBillId}`);
+            localStorage.removeItem(`edit_bill_customer_${currentBillId}`);
+            localStorage.removeItem(`edit_bill_details_${currentBillId}`);
+
+            setPopupContent({
+              title: "บันทึกการแก้ไขสำเร็จ",
+              message: `แก้ไขบิลเลขที่ ${currentBillId} เรียบร้อยแล้ว`,
+              actions: [
+                { label: "ปิดหน้าต่าง", handler: () => { setShowPopup(false); navigateTo('dashboard'); } },
+                {
+                  label: "🖨️ พิมพ์บิล",
+                  primary: true,
+                  handler: () => {
+                    handlePrintBill(updatedBill);
+                    setShowPopup(false);
+                    navigateTo('dashboard');
+                  }
+                }
+              ]
+            });
+            setShowPopup(true);
+          } catch (e) {
+            setPopupContent({ title: "ข้อผิดพลาด", message: "ไม่สามารถบันทึกการแก้ไขได้" });
+            setShowPopup(true);
+          } finally {
+            setIsSubmitting(false);
+          }
+        };
+
+        // สแกนบาร์โค้ด
+        const useBarcodeScan = (onScan, isEnabled = true) => {
+          const [barcodeBuffer, setBarcodeBuffer] = useState('');
+          const [lastScanTime, setLastScanTime] = useState(0);
+
+          useEffect(() => {
+            if (!isEnabled) return;
+
+            const handleKeyPress = (e) => {
+              const currentTime = new Date().getTime();
+
+              // ถ้าเวลาระหว่างการกดปุ่มห่างกันเกิน 100ms ให้เริ่มบันทึกใหม่
+              if (currentTime - lastScanTime > 100) {
+                setBarcodeBuffer('');
+              }
+              setLastScanTime(currentTime);
+
+              // เก็บตัวอักษรที่กดเข้า buffer
+              if (e.key !== 'Enter') {
+                setBarcodeBuffer(prev => prev + e.key);
+              } else {
+                // *** [FIX] ป้องกันไม่ให้ Enter ไปกดปุ่มอื่นใน DOM ***
+                e.preventDefault();
+                e.stopPropagation();
+                // ************************************************
+                // เมื่อกด Enter ให้ส่งค่าไปยัง callback
+                if (barcodeBuffer) {
+                  onScan(barcodeBuffer);
+                  setBarcodeBuffer('');
+                }
+              }
+            };
+
+            window.addEventListener('keypress', handleKeyPress);
+            return () => window.removeEventListener('keypress', handleKeyPress);
+          }, [barcodeBuffer, lastScanTime, onScan, isEnabled]);
+        };
+
+        const handleBarcodeScan = useCallback((barcode) => {
+          const engBarcode = translateBarcode(barcode);
+          console.log("raw:", barcode);
+          console.log("eng:", engBarcode);
+          // หาสินค้าจากบาร์โค้ด (ID)
+          const product = products.find(p => {
+            const customBarcode = p.barcode ? String(p.barcode).toLowerCase() : null; // ทำให้เป็นตัวพิมพ์เล็กเสมอ
+            const systemId = String(p.id);
+
+            // 1. ค้นหาจากรหัสบาร์โค้ดที่ตั้งเอง (ตัวพิมพ์เล็ก)
+            const isMatchCustom = customBarcode && customBarcode === engBarcode;
+            // 2. ค้นหาจาก ID สินค้าอัตโนมัติ (Fallback)
+            const isMatchSystem = systemId === engBarcode;
+
+            return isMatchCustom || isMatchSystem;
+          });
+          if (!product) {
+            setPopupContent({
+              title: "ไม่พบสินค้า",
+              message: `ไม่พบสินค้าที่มีรหัสบาร์โค้ด: ${barcode}`
+            });
+            setShowPopup(true);
+            setSearchTerm('');
+            return;
+          }
+
+          // เพิ่มสินค้าลงในบิล หรือเพิ่มจำนวนถ้ามีอยู่แล้ว
+          setBillItems(prev => {
+            const existingItem = prev.find(item => item.productId === product.id);
+            if (existingItem) {
+              const nextQty = existingItem.qty + 1;
+
+              // ตรวจสอบสต็อก: ถ้าจำนวนถัดไปเกินสต็อกที่มี
+              if (nextQty > (product.stock || 0)) {
+                setPopupContent({
+                  title: "สินค้าในสต็อกไม่พอ",
+                  message: `ไม่สามารถเพิ่ม "${product.name}" ได้แล้ว เนื่องจากในสต็อกมีเพียง ${product.stock} ชิ้น`
+                });
+                setShowPopup(true);
+                return prev;
+              }
+
+              return prev.map(item =>
+                item.productId === product.id
+                  ? { ...item, qty: nextQty }
+                  : item
+              );
+            }
+
+            if ((product.stock || 0) <= 0) {
+              setPopupContent({
+                title: "สินค้าหมด",
+                message: `ไม่สามารถเพิ่ม "${product.name}" ได้เนื่องจากไม่มีสินค้าในสต็อก`
+              });
+              setShowPopup(true);
+              return prev;
+            }
+
+            return [...prev, {
+              productId: product.id,
+              name: product.name,
+              price: product.price,
+              cost: product.cost,
+              qty: 1
+            }];
+          });
+        }, [products]);
+
+        // ใช้ hook บาร์โค้ด
+        useBarcodeScan(handleBarcodeScan, true);
+
+        return (
+          <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+            <Header title={`✏️ แก้ไขบิลเลขที่ #${billToEdit.id}`} />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+              {/* Left Column: Inputs & Search */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="bg-white p-6 rounded-xl shadow-lg space-y-4">
+                  <h3 className="text-lg font-bold text-green-700">ข้อมูลลูกค้า / ช่าง</h3>
+                  <input
+                    type="text"
+                    placeholder="ชื่อลูกค้า / ชื่อช่าง (ไม่บังคับ)"
+                    value={customer}
+                    onChange={(e) => setCustomer(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="รายละเอียดลูกค้า (ไม่บังคับ)"
+                    value={customerDetails}
+                    onChange={(e) => setCustomerDetails(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                  />
+
+                  <h3 className="text-lg font-bold text-green-700 pt-4">🔍 ค้นหาสินค้าเพื่อเพิ่มในบิล</h3>
+                  <input
+                    type="text"
+                    placeholder="พิมพ์ชื่อสินค้า..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                  />
+
+                  {/* Search Results Dropdown */}
+                  {searchTerm && searchResults.length > 0 && (
+                    <div className="bg-white border border-green-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                      {searchResults.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => addItemToBill(p)}
+                          className="flex justify-between items-center p-3 cursor-pointer hover:bg-green-100 transition duration-100 border-b last:border-b-0"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium text-gray-800">{p.name}</span>
+                            {/* [แก้ไข] แสดงสีตามเงื่อนไข: <= 5 สีแดง, > 5 สีน้ำเงิน */}
+                            <span className={`text-sm font-semibold ${p.stock <= 5 ? 'text-red-600' : 'text-blue-600'}`}>
+                              คงเหลือ: {p.stock || 0} {p.unit || 'ชิ้น'}
+                            </span>
+                          </div>
+                          <span className="text-sm font-semibold text-green-600">{formatCurrency(p.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Bill Items List */}
+                <div className="bg-white p-6 rounded-xl shadow-lg">
+                  <h3 className="text-xl font-bold text-green-700 mb-4 border-b pb-2">รายการสินค้าในบิล ({billItems.length} รายการ)</h3>
+                  <div className="space-y-3">
+                    {billItems.length === 0 ? (
+                      <p className="text-gray-500 text-center">กรุณาเพิ่มสินค้าจากช่องค้นหาด้านบน</p>
+                    ) : (
+                      billItems.map(item => (
+                        <div key={item.productId} className="flex items-center justify-between p-3 border border-yellow-100 rounded-lg bg-yellow-50">
+                          {/* Item Name & Price */}
+                          <div className="flex-1 min-w-0 pr-3">
+                            <p className="font-semibold text-gray-800 truncate">{item.name}</p>
+                            <p className="text-xs text-gray-500">@{formatCurrency(item.price)}</p>
+                          </div>
+
+                          {/* Quantity Control */}
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => updateItemQty(item.productId, -1)}
+                              className="p-1 w-8 h-8 flex items-center justify-center bg-gray-200 rounded-full text-gray-700 hover:bg-gray-300 transition"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
+                            </button>
+                            {/* ปรับปรุง: ใช้ input แทน span เพื่อให้แก้ไขจำนวนด้วยมือได้ */}
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.qty}
+                              onChange={(e) => updateItemQtyManual(item.productId, e.target.value)}
+                              className="font-bold text-gray-900 w-12 text-center p-1 border rounded-md"
+                            />
+                            <button
+                              onClick={() => updateItemQty(item.productId, 1)}
+                              className="p-1 w-8 h-8 flex items-center justify-center bg-green-400 text-white rounded-full hover:bg-green-500 transition"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                          </div>
+
+                          {/* Total & Remove */}
+                          <div className="ml-4 w-24 text-right">
+                            <p className="font-bold text-green-700">{formatCurrency(item.price * item.qty)}</p>
+                          </div>
+                          <button
+                            onClick={() => removeItem(item.productId)}
+                            className="ml-3 text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition"
+                            aria-label="Remove Item"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Summary & Action */}
+              <div className="lg:col-span-1">
+                <div className="sticky top-20 bg-green-700 text-white p-6 rounded-xl shadow-2xl space-y-4">
+                  <h3 className="text-2xl font-black mb-4 border-b border-green-500 pb-2 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                    สรุปยอดรวม
+                  </h3>
+
+                  {/* ยอดรวมก่อนหักส่วนลด */}
+                  <div className="flex justify-between items-center text-sm opacity-80">
+                    <span>ราคารวมสินค้า</span>
+                    <span>{formatCurrency(subTotal)}</span>
+                  </div>
+
+                  {/* รายการส่วนลดที่ได้รับ */}
+                  {totalDiscount > 0 && (
+                    <div className="space-y-1 py-3 border-y border-green-600 border-dashed">
+                      <div className="text-xs font-bold text-green-300 uppercase tracking-widest">ส่วนลดโปรโมชั่น:</div>
+                      {appliedPromotions.map((p, idx) => (
+                        <div key={idx} className="flex justify-between text-sm text-yellow-200 italic">
+                          <span>- {p.name}</span>
+                          <span>{formatCurrency(p.amount)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between font-bold text-yellow-300 pt-1 border-t border-green-800">
+                        <span>รวมส่วนลดทั้งหมด</span>
+                        <span>- {formatCurrency(totalDiscount)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ยอดสุทธิที่ลูกค้าต้องจ่าย */}
+                  <div className="flex justify-between items-center text-xl font-black pt-2">
+                    <span className="text-green-200">ยอดสุทธิ</span>
+                    <span className="text-3xl text-white drop-shadow-md">{formatCurrency(totalSale)}</span>
+                  </div>
+
+                  {/* ส่วนรับเงิน */}
+                  <div className="mt-6 pt-4 border-t border-green-500">
+                    <label className="block text-sm font-medium mb-1 text-green-100">รับเงินมา</label>
+                    <input
+                      type="number"
+                      value={amountReceived}
+                      onChange={(e) => setAmountReceived(e.target.value)}
+                      className="w-full p-3 bg-white text-gray-900 rounded-lg font-bold text-xl focus:ring-4 focus:ring-yellow-400 outline-none transition-all"
+                      placeholder="ยอดเงินจากลูกค้า"
+                      disabled={skipChange}
+                    />
+                  </div>
+
+                  {/* แสดงเงินทอน */}
+                  <div className="flex justify-between items-center text-lg bg-green-800 p-4 rounded-xl border border-green-600">
+                    <span>เงินทอน</span>
+                    <span className="text-yellow-300 font-black text-3xl">
+                      {formatCurrency(Math.max(0, parseFloat(amountReceived || '0') - totalSale))}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={handleSaveBill}
+                    disabled={isSubmitting || billItems.length === 0}
+                    className="w-full mt-4 py-5 bg-yellow-400 text-green-900 rounded-xl font-black text-xl hover:bg-yellow-300 active:scale-95 transition-all shadow-xl disabled:bg-gray-400 disabled:text-gray-200 flex items-center justify-center border-b-4 border-yellow-600"
+                  >
+                    {isSubmitting ? (
+                      <div className="flex items-center gap-2">
+                        <svg className="animate-spin h-6 w-6 text-green-900" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        กำลังบันทึก...
+                      </div>
+                    ) : (
+                      <span>💾 บันทึก & พิมพ์บิล</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // --- 10. Bill Detail View & PDF Generation ---
+
+      const handlePrintBill = (billData) => {
+        try {
+          const totalBeforeDiscount = billData.items.reduce((acc, item) => acc + (item.price * item.qty), 0);
+          // 2. คำนวณหาส่วนลด (ราคารวม - ยอดขายจริง)
+          const totalDiscount = totalBeforeDiscount - billData.totalSale;
+          // สร้าง HTML สำหรับ PDF (A5 landscape 210mm × 148mm)
+          const content = `
+                   <div style="font-family: 'Noto Serif Thai', sans-serif; width: 143mm; margin: 0 auto; box-sizing: border-box; background: #fff; padding: 3px;">
+    <h1 style="text-align: center; color: #166534; font-size: 12px; margin: 2px 0;">ใบเสร็จรับเงิน</h1>
+    
+    <div style="display: flex; justify-content: space-between; margin: 2px 0; font-size: 10px;">
+        <div>
+            <p style="margin: 1px 0;">ร้าน รุ่งฟ้าแอร์</p>
+            <p style="margin: 1px 0;">141 ม.4 ต.บ้านกลาง อ.เมือง จ.ปทุมธานี</p>
+            <p style="margin: 1px 0;">โทร: 085-168-9671</p>
+            
+            <p style="margin: 1px 0;">ลูกค้า: ${billData.customer || 'ไม่ระบุ'}</p>
+            ${billData.customerDetails ? `<p style="margin: 1px 0;">ข้อมูลลูกค้า: ${billData.customerDetails}</p>` : ''}
+        </div>
+        <div style="text-align: right; font-size: 10px;">
+            <p style="margin: 1px 0;">วันที่: ${formatDate(billData.date)}</p>
+            <p style="margin: 1px 0;">เลขที่: ${billData.id}</p>
+        </div>
+    </div>
+
+    <table style="width: 100%; border-collapse: collapse; margin: 2px 0; font-size: 10px;">
+        <thead>
+            <tr style="background-color: #166534; color: white;">
+                <th style="padding: 2px; text-align: center; border: 0.5px solid #333;">ลำดับ</th>
+                <th style="padding: 2px; text-align: left; border: 0.5px solid #333;">รายการ</th>
+                <th style="padding: 2px; text-align: right; border: 0.5px solid #333;">ราคา</th>
+                <th style="padding: 2px; text-align: center; border: 0.5px solid #333;">จำนวน</th>
+                <th style="padding: 2px; text-align: right; border: 0.5px solid #333;">รวม</th>
+            </tr>
+        </thead>
+        <tbody>
+                              ${billData.items.map((item, i) => `
+                                    <tr style="border-bottom: 0.5px solid #ddd;">
+                                        <td style="padding: 2px; text-align: center; border: 0.5px solid #ddd;">${i + 1}</td>
+                                        <td style="padding: 2px; text-align: left; border: 0.5px solid #ddd;">${item.name}</td>
+                                        <td style="padding: 2px; text-align: right; border: 0.5px solid #ddd;">${formatCurrency(item.price)}</td>
+                                        <td style="padding: 2px; text-align: center; border: 0.5px solid #ddd;">${item.qty}</td>
+                                        <td style="padding: 2px; text-align: right; border: 0.5px solid #ddd;">${formatCurrency(item.price * item.qty)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+        
+                        <div style="margin-top: 4px; font-size: 10px; display: flex; flex-direction: column; align-items: flex-end;">
+                  <div style="width: 200px; display: flex; justify-content: space-between;">
+                      <span>ยอดรวมสินค้า:</span>
+                      <span>${formatCurrency(totalBeforeDiscount)}</span>
+                  </div>
+                  
+                  ${totalDiscount > 0 ? `
+                  <div style="width: 200px; display: flex; justify-content: space-between; color: #b91c1c;">
+                      <span>ส่วนลดรวม:</span>
+                      <span>-${formatCurrency(totalDiscount)}</span>
+                  </div>
+                  ` : ''}
+
+                  <div style="width: 200px; display: flex; justify-content: space-between; font-weight: bold; font-size: 11px; border-top: 1px solid #333; margin-top: 2px; padding-top: 2px;">
+                      <span>ยอดจ่ายสุทธิ:</span>
+                      <span>${formatCurrency(billData.totalSale)}</span>
+                  </div>
+              </div>
+        
+                        <div style="text-align: right; margin-top: px; font-size: 10px;">
+                            <p style="margin: 8px 0;">........................</p>
+                        </div>
+
+                        <div style="text-align: right; margin-top: 1px; font-size: 10px; padding-right: 13px">
+                            <p style="margin: 1px 0;">ผู้รับเงิน</p>
+                        </div>
+        
+                        <div style="text-align: center; margin-top: 2px; font-size: 10px;">
+                            <p>ขอบคุณที่ใช้บริการ</p>
+                        </div>
+                    </div>
+                `;
+
+          // ตั้งค่า options สำหรับ html2pdf
+          const opt = {
+            margin: 1,
+            filename: `bill_${billData.id}_${new Date().toISOString().slice(0, 10)}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: {
+              scale: 3,
+              useCORS: true,
+              scrollY: 0, // แก้ปัญหาเว้นที่ว่างด้านบน ถ้าหน้าจอมีการเลื่อนอยู่
+            },
+            // Custom page size: 210mm (width) x 148.5mm (height)
+            jsPDF: { unit: 'mm', format: 'a5', orientation: 'portrait' }
+          };
+
+          // สร้าง PDF
+          html2pdf().from(content).set(opt).save();
+
+        } catch (error) {
+          console.error("PDF generation error:", error);
+          setPopupContent({
+            title: "ข้อผิดพลาด",
+            message: "เกิดข้อผิดพลาดในการสร้างไฟล์ PDF"
+          });
+          setShowPopup(true);
+        }
+      };
+
+      const BillDetailView = () => {
+        const bill = bills.find(b => b.id === currentBillId);
+
+        if (!bill) {
+          return (
+            <div className="p-6 text-center bg-white rounded-xl shadow-lg m-6">
+              <p className="text-red-500">ไม่พบบิลที่ระบุ</p>
+              <button onClick={() => navigateTo('dashboard')} className="mt-4 text-green-600 hover:underline">กลับหน้าหลัก</button>
+            </div>
+          );
+        }
+
+        return (
+          <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
+            <Header title={`รายละเอียดบิล #${bill.id}`} />
+
+            <div className="max-w-3xl mx-auto mt-6">
+              {/* Bill Info Card */}
+              <div className="bg-white p-6 rounded-xl shadow-xl border-t-4 border-green-500">
+                <div className="flex justify-between items-start mb-4 border-b pb-4">
+                  <div>
+                    <h2 className="text-3xl font-black text-green-700">บิลเลขที่ #{bill.id}</h2>
+                    <p className="text-sm text-gray-500 mt-1">วันที่ทำรายการ: {formatDate(bill.date)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-gray-700">ลูกค้า/ช่าง</p>
+                    <p className="text-xl font-bold text-green-600">{bill.customer || 'ไม่ระบุ'}</p>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <div className="overflow-x-auto mb-6">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-green-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-bold text-green-700 uppercase">สินค้า</th>
+                        <th className="px-3 py-2 text-right text-xs font-bold text-green-700 uppercase">ราคา/ชิ้น</th>
+                        <th className="px-3 py-2 text-right text-xs font-bold text-green-700 uppercase">จำนวน</th>
+                        <th className="px-3 py-2 text-right text-xs font-bold text-green-700 uppercase">รวมเงิน</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {bill.items.map((item, index) => (
+                        <tr key={index}>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">{item.name}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-600">{formatCurrency(item.price)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-right text-gray-600">{item.qty}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm font-bold text-right text-green-700">{formatCurrency(item.price * item.qty)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary Footer ที่แก้ไขแล้ว */}
+                <div className="flex justify-end pt-4 border-t border-gray-200">
+                  <div className="w-full max-w-xs space-y-2">
+                    {/* 1. ราคาเต็มก่อนหักส่วนลด */}
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>ยอดรวมสินค้า:</span>
+                      <span>{formatCurrency(bill.items.reduce((acc, item) => acc + (item.price * item.qty), 0))}</span>
+                    </div>
+
+                    {/* 2. ส่วนลด (คำนวณสด) */}
+                    {((bill.items.reduce((acc, item) => acc + (item.price * item.qty), 0)) - bill.totalSale) > 0 && (
+                      <div className="flex justify-between text-sm text-red-600 italic">
+                        <span>ส่วนลดโปรโมชั่น:</span>
+                        <span>-{formatCurrency((bill.items.reduce((acc, item) => acc + (item.price * item.qty), 0)) - bill.totalSale)}</span>
+                      </div>
+                    )}
+
+                    {/* 3. ยอดที่ลูกค้าต้องจ่ายจริง */}
+                    <div className="flex justify-between font-bold text-xl text-orange-500 border-t pt-2 mt-2">
+                      <span>ยอดชำระสุทธิ:</span>
+                      <span>{formatCurrency(bill.totalSale)}</span>
+                    </div>
+
+                    {/* 4. ต้นทุน (ใส่ || 0 กัน Error ถ้าไม่มีค่า) */}
+                    <div className="flex justify-between font-bold text-lg text-red-700">
+                      <span>ต้นทุนรวม:</span>
+                      <span>-{displayMaybeMasked(bill.totalCost || 0, true)}</span>
+                    </div>
+
+                    {/* 5. กำไรสุทธิ */}
+                    <div className="flex justify-between text-sm text-green-700 pt-2 border-t border-dashed">
+                      <span>กำไรสุทธิ:</span>
+                      <span>{displayMaybeMasked(bill.totalSale - (bill.totalCost || 0), true)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-center space-x-4 mt-6">
+                <button
+                  onClick={() => navigateTo('editBill', bill.id)}
+                  className="flex items-center px-6 py-3 bg-yellow-500 text-white rounded-lg font-bold hover:bg-yellow-600 transition shadow-lg"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                  </svg>
+                  แก้ไขบิลนี้
+                </button>
+                <button
+                  onClick={() => handlePrintBill(bill)}
+                  className="flex items-center px-6 py-3 bg-red-500 text-white rounded-lg font-bold hover:bg-red-600 transition shadow-lg"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2v2H5v-2h2m0-4h2v2H7v-2m0-4h2v2H7V9m10 4h2v2h-2v-2m0-4h2v2h-2V9m0-4h-2V3h-2v2H7V3H5v2H3v14a2 2 0 002 2h14a2 2 0 002-2V5h-2v-2h-2v2zm-2 10H7v2h10v-2z" /></svg>
+                  พิมพ์บิลเป็น PDF
+                </button>
+                <button
+                  onClick={() => navigateTo('dashboard')}
+                  className="flex items-center px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-bold hover:bg-gray-300 transition"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  ปิดหน้าต่าง
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // --- 11. Main Render Logic (Routing) ---
+      const renderPage = () => {
+        if (!isDbReady) {
+          return <LoadingSpinner />;
+        }
+
+        switch (currentPage) {
+          case 'dashboard':
+            return <DashboardView />;
+          case 'addBill':
+            return <AddBillView />;
+          case 'promotions':
+            return (
+              <PromotionView
+                products={products}
+                loadData={loadData}
+                setPopupContent={setPopupContent} // เพิ่มตัวนี้
+                setShowPopup={setShowPopup}       // เพิ่มตัวนี้
+              />
+            );
+          case 'manageProducts':
+            return <ProductManagerView />;
+          case 'billDetail':
+            return <BillDetailView />;
+          case 'editBill':
+            return <EditBillView />;
+          // [NEW] เพิ่มการรองรับหน้าประวัติบิล
+          case 'billHistory':
+            return <BillHistoryView />;
+          default:
+            return <DashboardView />;
+          case 'overview':
+            return (
+              <OverviewDashboard
+                bills={bills}
+                formatCurrency={formatCurrency}
+                openPasswordModal={openPasswordModal}
+                setCurrentPage={setCurrentPage}
+              />
+            );
+        }
+      };
+
+      return (
+        <div className="min-h-screen flex bg-gray-50 font-inter">
+          {/* Sidebar */}
+          <Sidebar />
+
+          {/* Main Content Area */}
+          <main className="flex-1 overflow-y-auto w-full lg:w-[calc(100%-16rem)]">
+            {renderPage()}
+          </main>
+
+          {/* Global Pop-up Modal */}
+          {showPopup && popupContent && (
+            <ModalPopup
+              title={popupContent.title}
+              message={popupContent.message}
+              onClose={() => setShowPopup(false)}
+              actions={popupContent.actions}
+            />
+          )}
+          {/* Password confirm modal replaces all prompt() calls */}
+          {showPasswordModal && <PasswordConfirmModal />}
+        </div>
+      )
+    };
+
+    // --- 12. ReactDOM Render ---
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+
+</html>
