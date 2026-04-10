@@ -775,13 +775,32 @@
 
       // --- Data Fetching and Initialization ---
       const loadData = useCallback(async () => {
-        try {
-          await loadPdfLibs(); // Load PDF libraries
-          // Use the corrected getAll function
-          const [loadedProducts, loadedBills] = await Promise.all([
-            getAll(PRODUCT_STORE),
-            getAll(BILL_STORE)
-          ]);
+      try {
+        await loadPdfLibs(); // โหลด library สำหรับ PDF
+        
+        // ดึงข้อมูลครั้งแรกจาก Firebase มาใส่ใน State
+        const productSnapshot = await db.collection(PRODUCT_STORE).get();
+        const loadedProducts = productSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        const billSnapshot = await db.collection(BILL_STORE).get();
+        const loadedBills = billSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        setProducts(loadedProducts);
+        // เรียงบิลตามวันที่ล่าสุด
+        setBills(loadedBills.sort((a, b) => new Date(b.date) - new Date(a.date)));
+        
+        setIsDbReady(true); // เปลี่ยนสถานะเป็นโหลดเสร็จแล้ว
+        console.log('Firebase data loaded successfully.');
+      } catch (e) {
+        console.error("Initial data load failed:", e);
+        setPopupContent({ 
+          title: "ข้อผิดพลาด", 
+          message: "ไม่สามารถดึงข้อมูลจาก Cloud ได้ กรุณาเช็คอินเทอร์เน็ตหรือ Firebase Rules" 
+        });
+        setShowPopup(true);
+        setIsDbReady(true);
+      }
+    }, []);
 
           setProducts(loadedProducts);
           // Sort bills by date descending (newest first)
