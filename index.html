@@ -78,13 +78,8 @@
     const putData = async (storeName, data) => {
       const dataToSave = { ...data };
       Object.keys(dataToSave).forEach(key => {
-        if (dataToSave[key] === undefined || dataToSave[key] === null) {
-          // ถ้าเป็นฟิลด์ตัวเลขให้ใส่ 0 ถ้าเป็นข้อความให้ใส่ ""
-          if (key === 'price' || key === 'cost' || key === 'stock') {
-            dataToSave[key] = 0;
-          } else {
-            dataToSave[key] = "";
-          }
+        if (dataToSave[key] === undefined) {
+          dataToSave[key] = ""; // ถ้าค่าไหนว่าง ให้เปลี่ยนเป็นข้อความว่างแทน
         }
       });
       const id = dataToSave.id ? String(dataToSave.id) : null;
