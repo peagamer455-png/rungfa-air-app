@@ -99,7 +99,7 @@
             .map(p => parseInt(p.barcode))
             .filter(b => !isNaN(b));  
 
-            const maxBarcode = numericBarcodes.length > 0 ? Math.max(...numericBarcodes) : 1000;
+            const maxBarcode = numericBarcodes.length > 0 ? Math.max(...numericBarcodes) : 0;
           dataToSave.barcode = String(maxBarcode + 1);
         }
       }
