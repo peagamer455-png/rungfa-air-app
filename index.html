@@ -1069,7 +1069,7 @@
         const handleDelete = async () => {
           setPopupContent({
             title: "ยืนยันการลบบิล",
-            message: `คุณต้องการลบบิลเลขที่ ${bill.id} หรือไม่? ระบบจะคืนสินค้าเข้าสต็อกโดยค้นหาจาก "ชื่อสินค้า"`,
+            message: `คุณต้องการลบบิลเลขที่ ${bill.billNumber} หรือไม่? ระบบจะคืนสินค้าเข้าสต็อกอัตโนมัติ`,
             actions: [
               { label: "ยกเลิก", handler: () => { setShowPopup(false); } },
               {
@@ -2494,7 +2494,7 @@
 
             setPopupContent({
               title: "บันทึกบิลสำเร็จ",
-              message: `บันทึกบิลเรียบร้อยแล้ว (เลขที่ ${displayBillNumber})`,
+              message: `บันทึกบิลเรียบร้อยแล้ว (เลขที่ ${bill.billNumber})`,
               actions: [
                 {
                   label: "ปิดหน้าต่าง",
