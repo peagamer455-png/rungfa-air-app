@@ -54,7 +54,7 @@
 
     // ดึงข้อมูลแบบ Real-time (เครื่องอื่นแก้ เครื่องเราเปลี่ยนทันที)
     const subscribeData = (storeName, callback) => {
-      return db.collection(storeName).onSnapshot((snapshot) => {
+      return loadData(storeName).onSnapshot((snapshot) => {
         const data = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
@@ -466,7 +466,7 @@
       const [searchTerm, setSearchTerm] = React.useState('');
 
       const fetchPromotions = async () => {
-        const snapshot = await db.collection(PROMO_STORE).get();
+        const snapshot = await loadData(PROMO_STORE).get();
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         if (data) {
@@ -2358,7 +2358,7 @@
         useEffect(() => {
           const fetchPromos = async () => {
             try {
-              const snapshot = await db.collection('promotions').get();
+              const snapshot = await loadData('promotions').get();
               const promosData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
@@ -2387,7 +2387,7 @@
         React.useEffect(() => {
           const loadPromos = async () => {
             try {
-              const snapshot = await db.collection(PROMO_STORE).get();
+              const snapshot = await loadData(PROMO_STORE).get();
               const data = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
@@ -2960,7 +2960,7 @@
         useEffect(() => {
           const fetchPromos = async () => {
             try {
-              const snapshot = await db.collection('promotions').get();
+              const snapshot = await loadData('promotions').get();
               const promosData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
@@ -2991,7 +2991,7 @@
         React.useEffect(() => {
           const loadPromos = async () => {
             try {
-              const snapshot = await db.collection(PROMO_STORE).get();
+              const snapshot = await loadData(PROMO_STORE).get();
               const data = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
