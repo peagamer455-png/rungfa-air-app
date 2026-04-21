@@ -1504,7 +1504,7 @@
           const handleDelete = async () => {
             setPopupContent({
               title: "ยืนยันการลบบิล",
-              message: `คุณต้องการลบบิลเลขที่ ${bill.id} หรือไม่? ระบบจะคืนสินค้าเข้าสต็อกโดยค้นหาจาก "ชื่อสินค้า"`,
+              message: `คุณต้องการลบบิลเลขที่ #${bill.id} หรือไม่? ระบบจะคืนสินค้าเข้าสต็อกโดยค้นหาจาก "ชื่อสินค้า"`,
               actions: [
                 { label: "ยกเลิก", handler: () => { setShowPopup(false); } },
                 {
