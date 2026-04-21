@@ -52,12 +52,6 @@
     const BILL_STORE = 'bills';
     const PROMO_STORE = 'promotions';
 
-    // ดึงข้อมูลแบบ Real-time (เครื่องอื่นแก้ เครื่องเราเปลี่ยนทันที)
-    const subscribeData = () => {
-      console.log("ระบบกำลังเปลี่ยนไปใช้ Supabase Realtime...");
-      return () => {}; 
-    };
-
     // บันทึก/แก้ไขข้อมูล (เพิ่มที่เก็บสินค้าได้เลย)
     const generateAutoBarcode = (currentProducts) => {
       if (!currentProducts || currentProducts.length === 0) return "1";
@@ -834,54 +828,53 @@
 
       // --- Data Fetching and Initialization ---
 
+      // --- 1. ประกาศ loadData ไว้ข้างบนสุด เพื่อให้ตัวอื่นเรียกใช้ได้ ---
       const loadData = useCallback(async () => {
         try {
-          // 1. โหลด library สำหรับ PDF (ของเดิมนาย)
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // 2. ดึงข้อมูลจาก Supabase ตาราง products
-          const { data: loadedProducts, error: productError } = await _supabase
+          // ดึงข้อมูลสินค้า
+          const { data: pData, error: pError } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true });
 
-          if (productError) throw productError;
-
-          // 3. ดึงข้อมูลจาก Supabase ตาราง bills
-          const { data: loadedBills, error: billError } = await _supabase
+          // ดึงข้อมูลบิล
+          const { data: bData, error: bError } = await _supabase
             .from(BILL_STORE)
             .select('*')
             .order('date', { ascending: false });
 
-          if (billError) throw billError;
+          if (pError) throw pError;
+          if (bError) throw bError;
 
-          // 4. อัปเดตข้อมูลเข้า State
-          setProducts(loadedProducts || []);
-          setBills(loadedBills || []);
-
+          setProducts(pData || []);
+          setBills(bData || []);
           setIsDbReady(true);
-          console.log('Supabase data loaded successfully.');
+          console.log('โหลดข้อมูลจาก Supabase สำเร็จ');
         } catch (e) {
-          console.error("Initial data load failed:", e);
+          console.error("โหลดข้อมูลไม่สำเร็จ:", e);
           setIsDbReady(true);
         }
       }, []);
 
-      // เรียกใช้งาน loadData ทันทีเมื่อเปิดแอป
+      // --- 2. เรียกใช้ loadData เมื่อเปิดแอป ---
       React.useEffect(() => {
         loadData();
       }, [loadData]);
 
-      // ดักฟังข้อมูลแบบ Real-time (Supabase Style)
+      // --- 3. ระบบ Realtime ฟังข้อมูลจาก Supabase ---
       React.useEffect(() => {
         if (!isDbReady) return;
 
         const channel = _supabase
           .channel('db-realtime')
           .on('postgres_changes', { event: '*', schema: 'public', table: BILL_STORE }, () => {
+            console.log('บิลมีการอัปเดต...');
             loadData();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: PRODUCT_STORE }, () => {
+            console.log('สินค้ามีการอัปเดต...');
             loadData();
           })
           .subscribe();
