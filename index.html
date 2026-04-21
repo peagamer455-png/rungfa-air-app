@@ -3529,17 +3529,19 @@
                     </div>
                 `;
 
-          // ตั้งค่า options สำหรับ html2pdf
+          const cleanBillNo = String(billData.billNumber || "").replace(/[^\x20-\x7Eก-ฮะ-์]/g, '');
+
+          const fileIdentifier = cleanBillNo || String(billData.id).substring(0, 5);
+
           const opt = {
             margin: 1,
-            filename: `bill_${billData.id}_${new Date().toISOString().slice(0, 10)}.pdf`,
+            filename: `bill_${fileIdentifier}_${new Date().toISOString().slice(0, 10)}.pdf`,
             image: { type: 'jpeg', quality: 0.98 },
             html2canvas: {
               scale: 3,
               useCORS: true,
-              scrollY: 0, // แก้ปัญหาเว้นที่ว่างด้านบน ถ้าหน้าจอมีการเลื่อนอยู่
+              scrollY: 0,
             },
-            // Custom page size: 210mm (width) x 148.5mm (height)
             jsPDF: { unit: 'mm', format: 'a5', orientation: 'portrait' }
           };
 
