@@ -85,43 +85,57 @@
     };
     const putData = async (storeName, data, allItems = []) => {
       const dataToSave = { ...data };
+
+      // 1. ระบุชื่อตารางให้ตรงกับ Supabase (ใช้ชื่อตัวแปรที่นายมีอยู่มาเช็ค)
+      const tableName = (storeName === BILL_STORE) ? 'bills' : 'products';
+
+      // --- ส่วน Logic เดิมของนาย: รันเลขบิล ---
       if (storeName === BILL_STORE && !dataToSave.id) {
-        // หาเลขบิลที่มากที่สุด (สมมติว่าเลขบิลถูกเก็บในฟิลด์ชื่อ billNumber หรือถ้าไม่มีให้สร้างใหม่)
         const numericBills = allItems
           .map(b => parseInt(b.billNumber))
           .filter(num => !isNaN(num));
-
         const maxBill = numericBills.length > 0 ? Math.max(...numericBills) : 0;
-        dataToSave.billNumber = String(maxBill + 1); // รันเลขบิลต่อ
+        dataToSave.billNumber = String(maxBill + 1);
       }
+
+      // --- ส่วน Logic เดิมของนาย: จัดการบาร์โค้ดสินค้า ---
       if (storeName === PRODUCT_STORE) {
-        // ถ้าผู้ใช้ไม่ได้กรอกบาร์โค้ดมา (ว่าง หรือมีแต่ช่องว่าง)
         if (!dataToSave.barcode || String(dataToSave.barcode).trim() === "") {
-          // ให้แอบเอา ID มาใส่เป็นบาร์โค้ดในฐานข้อมูล
           if (dataToSave.id) {
             dataToSave.barcode = String(dataToSave.id);
           } else {
-            // ถ้าเป็นสินค้าใหม่สดๆ ที่ไม่มีแม้แต่ ID ให้รันเลขต่อจากตัวที่มากที่สุด
             const numericBarcodes = allItems.map(p => parseInt(p.barcode)).filter(b => !isNaN(b));
             const max = numericBarcodes.length > 0 ? Math.max(...numericBarcodes) : 1000;
             dataToSave.barcode = String(max + 1);
           }
         }
       }
+
+      // --- ล้างค่า undefined/null ให้เป็นค่าเริ่มต้น (กัน Supabase ด่า) ---
       Object.keys(dataToSave).forEach(key => {
         if (dataToSave[key] === undefined || dataToSave[key] === null) {
           dataToSave[key] = (key === 'stock' || key === 'price' || key === 'cost') ? 0 : "";
         }
       });
-      const id = dataToSave.id ? String(dataToSave.id) : null;
-      delete dataToSave.id;
 
-      if (id) {
-        await db.collection(storeName).doc(id).set(dataToSave, { merge: true });
-        return id;
-      } else {
-        const docRef = await db.collection(storeName).add(dataToSave);
-        return docRef.id;
+      try {
+        // --- ส่วนที่เปลี่ยน: ยิงเข้า Supabase แทน Firebase ---
+        // upsert จะดูที่ Primary Key (id) ถ้ามีอยู่แล้วมันจะ Update ถ้าไม่มีมันจะ Insert ใหม่
+        const { data: result, error } = await _supabase
+          .from(tableName)
+          .upsert(dataToSave)
+          .select();
+
+        if (error) throw error;
+
+        // คืนค่า ID กลับไปเพื่อให้โค้ดส่วนอื่นของนายทำงานต่อได้ (เหมือน docRef.id เดิม)
+        return result[0].id;
+
+      } catch (err) {
+        console.error("Supabase PutData Error:", err.message);
+        setPopupContent({ title: "❌ บันทึกไม่สำเร็จ", message: "เกิดข้อผิดพลาด: " + err.message });
+        setShowPopup(true);
+        return null;
       }
     };
 
