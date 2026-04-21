@@ -2278,9 +2278,20 @@
 
         useEffect(() => {
           const fetchPromos = async () => {
-            const data = await getAll('promotions');
-            setPromotions(data || []);
+            try {
+              const snapshot = await db.collection('promotions').get();
+              const promosData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+
+              setPromotions(promosData || []);
+            } catch (error) {
+              console.error("Error loading promos from Firebase:", error);
+              setPromotions([]);
+            }
           };
+
           fetchPromos();
         }, []);
 
@@ -2870,9 +2881,20 @@
 
         useEffect(() => {
           const fetchPromos = async () => {
-            const data = await getAll('promotions');
-            setPromotions(data || []);
+            try {
+              const snapshot = await db.collection('promotions').get();
+              const promosData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+
+              setPromotions(promosData || []);
+            } catch (error) {
+              console.error("Error loading promos from Firebase:", error);
+              setPromotions([]); 
+            }
           };
+
           fetchPromos();
         }, []);
 
