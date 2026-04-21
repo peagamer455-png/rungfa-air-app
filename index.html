@@ -2890,7 +2890,7 @@
               setPromotions(promosData || []);
             } catch (error) {
               console.error("Error loading promos from Firebase:", error);
-              setPromotions([]); 
+              setPromotions([]);
             }
           };
 
@@ -3062,44 +3062,34 @@
 
           setIsSubmitting(true);
           try {
-            // 1. ดึงข้อมูลบิลเดิมจากฐานข้อมูลเพื่อตรวจสอบจำนวนสินค้าก่อนหน้า
+            // 1. ดึงข้อมูลบิลเดิมเพื่อคืนสต็อก (เฉพาะกรณีแก้ไข)
             const oldBill = bills.find(b => b.id === currentBillId);
-
-            // 2. คืนสต็อกสินค้าเดิมทั้งหมดในบิลนี้ก่อน
             if (oldBill && oldBill.items) {
               for (const oldItem of oldBill.items) {
                 const product = products.find(p => p.id === oldItem.productId);
                 if (product) {
                   product.stock = (product.stock || 0) + (oldItem.qty || 0);
-                  await putData(PRODUCT_STORE, product); // อัปเดตสต็อกคืนเข้าไประบบ
+                  await putData(PRODUCT_STORE, product);
                 }
               }
             }
 
-            // 3. หักสต็อกสินค้าตามรายการใหม่ที่แก้ไขแล้ว
+            // 2. หักสต็อกสินค้าตามรายการใหม่
             for (const newItem of billItems) {
               const product = products.find(p => p.id === newItem.productId);
               if (product) {
                 product.stock = (product.stock || 0) - (newItem.qty || 0);
-                await putData(PRODUCT_STORE, product); // อัปเดตหักสต็อกใหม่ออก
+                await putData(PRODUCT_STORE, product);
               }
             }
 
             const subTotal = billItems.reduce((sum, item) => sum + (Number(item.price) * Number(item.qty)), 0);
-
-            // 2. ดึงค่าส่วนลดจากตัวแปรหน้าจอ (สมมติว่าคุณมีตัวแปร totalDiscount ที่คำนวณโปรโมชั่นไว้แล้ว)
             const discountAmount = typeof totalDiscount !== 'undefined' ? totalDiscount : 0;
-
-            // 3. คำนวณยอดขายจริงที่หักส่วนลดแล้ว (นี่คือยอดที่ต้องบันทึกลง DB)
             const finalTotalSale = subTotal - discountAmount;
-
-            // 4. คำนวณต้นทุนรวม
             const totalCost = billItems.reduce((sum, item) => sum + (Number(item.cost || 0) * Number(item.qty)), 0);
-
-            // 5. คำนวณกำไรสุทธิ (จากยอดที่ลดแล้ว)
             const totalProfit = finalTotalSale - totalCost;
 
-            // 4. บันทึกข้อมูลบิลชุดใหม่ลงใน Database
+            // 3. เตรียม Data สำหรับบันทึก (ใช้ billToEdit.billNumber เดิมเพื่อไม่ให้เลขเปลี่ยน)
             const updatedBill = {
               ...billToEdit,
               customer,
@@ -3108,21 +3098,33 @@
               totalSale: finalTotalSale,
               totalCost,
               totalProfit,
-              date: billToEdit.date // ใช้ค่าวันที่เดิม
+              date: billToEdit?.date || new Date().toISOString()
             };
 
+            // บันทึกโดยใช้ ID เดิม (เพื่อให้ Firebase เขียนทับที่เดิม)
             await putData(BILL_STORE, updatedBill);
 
-            // ล้างข้อมูลร่างหลังเซฟสำเร็จ
+            // 4. ล้างข้อมูลร่างหลังเซฟสำเร็จ
             localStorage.removeItem(`edit_bill_items_${currentBillId}`);
             localStorage.removeItem(`edit_bill_customer_${currentBillId}`);
             localStorage.removeItem(`edit_bill_details_${currentBillId}`);
 
+            // --- ส่วนที่นายต้องการ: แสดงเลขบิลที่อ่านออกใน Popup ---
+            // ดึงเลขบิลมาล้างขยะ (ถ้าไม่มีให้ใช้ 5 ตัวแรกของ ID แทน)
+            const cleanBillNo = String(billToEdit?.billNumber || "").replace(/[^\x20-\x7Eก-ฮะ-์]/g, '');
+            const displayNo = cleanBillNo || String(currentBillId).substring(0, 5);
+
             setPopupContent({
-              title: "บันทึกการแก้ไขสำเร็จ",
-              message: `แก้ไขบิลเลขที่ ${currentBillId} เรียบร้อยแล้ว`,
+              title: "✅ บันทึกการแก้ไขสำเร็จ",
+              message: `แก้ไขบิลเลขที่ #${displayNo} เรียบร้อยแล้ว`,
               actions: [
-                { label: "ปิดหน้าต่าง", handler: () => { setShowPopup(false); navigateTo('dashboard'); } },
+                {
+                  label: "ปิดหน้าต่าง",
+                  handler: () => {
+                    setShowPopup(false);
+                    navigateTo('dashboard');
+                  }
+                },
                 {
                   label: "🖨️ พิมพ์บิล",
                   primary: true,
@@ -3136,7 +3138,8 @@
             });
             setShowPopup(true);
           } catch (e) {
-            setPopupContent({ title: "ข้อผิดพลาด", message: "ไม่สามารถบันทึกการแก้ไขได้" });
+            console.error("Save Error:", e);
+            setPopupContent({ title: "ข้อผิดพลาด", message: "ไม่สามารถบันทึกได้: " + e.message });
             setShowPopup(true);
           } finally {
             setIsSubmitting(false);
