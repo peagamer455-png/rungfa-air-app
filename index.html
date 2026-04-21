@@ -3811,7 +3811,7 @@
                   id: item.id, // ใช้ ID เดิมจาก Firebase ได้เลย
                   date: item.date,
                   customerName: item.customer || "ลูกค้าทั่วไป", // เปลี่ยนจาก customer เป็น customerName
-                  items: item.items || [],
+                  items: item.items || [], 
                   total: parseFloat(item.totalSale) || 0, // เปลี่ยนจาก totalSale เป็น total
                   discount: parseFloat(item.discount) || 0,
                   netTotal: parseFloat(item.totalSale) || 0, // หรือคำนวณใหม่ถ้ามีส่วนลด
