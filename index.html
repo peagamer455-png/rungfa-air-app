@@ -3681,6 +3681,66 @@
         );
       };
 
+      // --- ต้องวางไว้ข้างใน App component เท่านั้น เพื่อให้เห็นตัวแปร bills และ products ---
+      const exportData = async () => {
+        try {
+          // ตรวจสอบว่ามีข้อมูลหรือไม่
+          if (!bills || bills.length === 0) {
+            alert("ไม่มีข้อมูลบิลที่จะสำรองครับ");
+            return;
+          }
+
+          const dataToExport = {
+            bills: bills,
+            products: products,
+            promotions: typeof promotions !== 'undefined' ? promotions : [],
+            backupDate: new Date().toISOString(),
+            shopName: "Rung Fah Air"
+          };
+
+          const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `rungfah_backup_${new Date().toISOString().slice(0, 10)}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+
+          setPopupContent({ title: "📤 สำรองข้อมูลสำเร็จ", message: "บันทึกไฟล์เรียบร้อยแล้วครับ" });
+          setShowPopup(true);
+        } catch (error) {
+          console.error("Export Error:", error);
+          alert("Export Error: " + error.message);
+        }
+      };
+
+      const importData = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const importedData = JSON.parse(e.target.result);
+            if (confirm("⚠️ ข้อมูลเดิมจะถูกเขียนทับ นายแน่ใจนะ?")) {
+              if (importedData.bills) {
+                for (const bill of importedData.bills) await putData(BILL_STORE, bill);
+              }
+              if (importedData.products) {
+                for (const product of importedData.products) await putData(PRODUCT_STORE, product);
+              }
+              alert("📥 นำเข้าข้อมูลสำเร็จ!");
+              window.location.reload();
+            }
+          } catch (error) {
+            alert("ไฟล์ไม่ถูกต้อง: " + error.message);
+          }
+        };
+        reader.readAsText(file);
+      };
+
       // --- 11. Main Render Logic (Routing) ---
       const renderPage = () => {
         if (!isDbReady) {
