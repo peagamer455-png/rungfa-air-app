@@ -841,25 +841,25 @@
       const loadData = useCallback(async () => {
         try {
           // 1. โหลด library สำหรับ PDF (ของเดิมนาย)
-          await loadPdfLibs();
+          if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
           // 2. ดึงข้อมูลจาก Supabase ตาราง products
           const { data: loadedProducts, error: productError } = await _supabase
-            .from('products')
+            .from(PRODUCT_STORE)
             .select('*')
-            .order('name', { ascending: true }); // เรียงชื่อสินค้าตามตัวอักษร
+            .order('name', { ascending: true });
 
           if (productError) throw productError;
 
           // 3. ดึงข้อมูลจาก Supabase ตาราง bills
           const { data: loadedBills, error: billError } = await _supabase
-            .from('bills')
+            .from(BILL_STORE)
             .select('*')
-            .order('date', { ascending: false }); // เรียงบิลล่าสุดขึ้นก่อน (ไม่ต้องมา sort เองทีหลัง)
+            .order('date', { ascending: false });
 
           if (billError) throw billError;
 
-          // 4. อัปเดตข้อมูลเข้า State ของแอป
+          // 4. อัปเดตข้อมูลเข้า State
           setProducts(loadedProducts || []);
           setBills(loadedBills || []);
 
@@ -867,41 +867,33 @@
           console.log('Supabase data loaded successfully.');
         } catch (e) {
           console.error("Initial data load failed:", e);
-          setPopupContent({
-            title: "ข้อผิดพลาด",
-            message: "ไม่สามารถดึงข้อมูลจาก Supabase ได้: " + e.message
-          });
-          setShowPopup(true);
           setIsDbReady(true);
         }
       }, []);
 
       // เรียกใช้งาน loadData ทันทีเมื่อเปิดแอป
-      useEffect(() => {
+      React.useEffect(() => {
         loadData();
+      }, [loadData]);
 
-        // ดักฟังข้อมูลสินค้าแบบ Real-time
-        const unsubProducts = subscribeData(PRODUCT_STORE, (data) => {
-          // [แก้ไขจุดนี้] บังคับให้เรียงลำดับตาม ID แบบตัวเลข
-          const sorted = [...data].sort((a, b) => {
-            const idA = Number(a.id) || 0;
-            const idB = Number(b.id) || 0;
-            return idA - idB; // เรียงจากน้อยไปมาก
-          });
-          setProducts(sorted);
-        });
+      // ดักฟังข้อมูลแบบ Real-time (Supabase Style)
+      React.useEffect(() => {
+        if (!isDbReady) return;
 
-        const unsubBills = subscribeData(BILL_STORE, (data) => {
-          // ส่วนของบิลให้เรียงตามวันที่ (ใหม่ไปเก่า)
-          const sorted = [...data].sort((a, b) => new Date(b.date) - new Date(a.date));
-          setBills(sorted);
-        });
+        const channel = _supabase
+          .channel('db-realtime')
+          .on('postgres_changes', { event: '*', schema: 'public', table: BILL_STORE }, () => {
+            loadData();
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: PRODUCT_STORE }, () => {
+            loadData();
+          })
+          .subscribe();
 
         return () => {
-          unsubProducts();
-          unsubBills();
+          _supabase.removeChannel(channel);
         };
-      }, [loadData]);
+      }, [isDbReady, loadData]);
 
       useEffect(() => {
         loadPdfLibs();
