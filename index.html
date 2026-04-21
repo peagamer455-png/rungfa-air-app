@@ -902,29 +902,6 @@
           };
         }, [isDbReady, loadData]);
 
-        // ดักฟังข้อมูลสินค้าแบบ Real-time
-        const unsubProducts = subscribeData(PRODUCT_STORE, (data) => {
-          // [แก้ไขจุดนี้] บังคับให้เรียงลำดับตาม ID แบบตัวเลข
-          const sorted = [...data].sort((a, b) => {
-            const idA = Number(a.id) || 0;
-            const idB = Number(b.id) || 0;
-            return idA - idB; // เรียงจากน้อยไปมาก
-          });
-          setProducts(sorted);
-        });
-
-        const unsubBills = subscribeData(BILL_STORE, (data) => {
-          // ส่วนของบิลให้เรียงตามวันที่ (ใหม่ไปเก่า)
-          const sorted = [...data].sort((a, b) => new Date(b.date) - new Date(a.date));
-          setBills(sorted);
-        });
-
-        return () => {
-          unsubProducts();
-          unsubBills();
-        };
-      }, [loadData]);
-
       useEffect(() => {
         loadPdfLibs();
 
