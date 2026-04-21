@@ -901,6 +901,7 @@
             _supabase.removeChannel(channel);
           };
         }, [isDbReady, loadData]);
+      }, [loadData]);
 
       useEffect(() => {
         loadPdfLibs();
