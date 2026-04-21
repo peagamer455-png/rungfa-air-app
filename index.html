@@ -730,6 +730,28 @@
       const passwordOnSuccessRef = useRef(null);
       const passwordInputRef = useRef(null);
 
+      // ฟังก์ชันฟังการเปลี่ยนแปลงข้อมูล (Realtime) ของ Supabase
+      React.useEffect(() => {
+        if (!isDbReady) return;
+
+        // สร้างช่องสัญญาณ (Channel) เพื่อฟัง table 'bills' และ 'products'
+        const channel = _supabase
+          .channel('schema-db-changes')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'bills' }, (payload) => {
+            console.log('ข้อมูลบิลมีการเปลี่ยนแปลง:', payload);
+            loadData(); // เรียกดึงข้อมูลใหม่มาโชว์
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
+            console.log('ข้อมูลสินค้ามีการเปลี่ยนแปลง:', payload);
+            loadData(); // เรียกดึงข้อมูลใหม่มาโชว์
+          })
+          .subscribe();
+
+        return () => {
+          _supabase.removeChannel(channel);
+        };
+      }, [isDbReady, loadData]);
+
       const openPasswordModal = (onSuccess) => {
         passwordOnSuccessRef.current = onSuccess;
         setPasswordInput('');
