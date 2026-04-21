@@ -2506,7 +2506,7 @@
 
             setPopupContent({
               title: "บันทึกบิลสำเร็จ",
-              message: `บันทึกบิลเรียบร้อยแล้ว (เลขที่ ${bill.billNumber})`,
+              message: `บันทึกบิลเรียบร้อยแล้ว (เลขที่ ${newBillNumber})`,
               actions: [
                 {
                   label: "ปิดหน้าต่าง",
@@ -3120,7 +3120,7 @@
 
             setPopupContent({
               title: "บันทึกการแก้ไขสำเร็จ",
-              message: `แก้ไขบิลเลขที่ ${bill.billNumber} เรียบร้อยแล้ว`,
+              message: `แก้ไขบิลเลขที่ ${editingBill.billNumber} เรียบร้อยแล้ว`,
               actions: [
                 { label: "ปิดหน้าต่าง", handler: () => { setShowPopup(false); navigateTo('dashboard'); } },
                 {
