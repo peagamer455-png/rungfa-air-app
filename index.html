@@ -2308,7 +2308,6 @@
         React.useEffect(() => {
           const loadPromos = async () => {
             try {
-              // เปลี่ยนจาก getAll('promotions') เป็นการดึงจาก Firebase แทน
               const snapshot = await db.collection(PROMO_STORE).get();
               const data = snapshot.docs.map(doc => ({
                 id: doc.id,
@@ -2913,7 +2912,6 @@
         React.useEffect(() => {
           const loadPromos = async () => {
             try {
-              // เปลี่ยนจาก getAll('promotions') เป็นการดึงจาก Firebase แทน
               const snapshot = await db.collection(PROMO_STORE).get();
               const data = snapshot.docs.map(doc => ({
                 id: doc.id,
