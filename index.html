@@ -822,26 +822,36 @@
       // --- Data Fetching and Initialization ---
       const loadData = useCallback(async () => {
         try {
-          await loadPdfLibs(); // โหลด library สำหรับ PDF
+          // 1. โหลด library สำหรับ PDF (ของเดิมนาย)
+          await loadPdfLibs();
 
-          // ดึงข้อมูลครั้งแรกจาก Firebase มาใส่ใน State
-          const productSnapshot = await db.collection(PRODUCT_STORE).get();
-          const loadedProducts = productSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // 2. ดึงข้อมูลจาก Supabase ตาราง products
+          const { data: loadedProducts, error: productError } = await _supabase
+            .from('products')
+            .select('*')
+            .order('name', { ascending: true }); // เรียงชื่อสินค้าตามตัวอักษร
 
-          const billSnapshot = await db.collection(BILL_STORE).get();
-          const loadedBills = billSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          if (productError) throw productError;
 
-          setProducts(loadedProducts);
-          // เรียงบิลตามวันที่ล่าสุด
-          setBills(loadedBills.sort((a, b) => new Date(b.date) - new Date(a.date)));
+          // 3. ดึงข้อมูลจาก Supabase ตาราง bills
+          const { data: loadedBills, error: billError } = await _supabase
+            .from('bills')
+            .select('*')
+            .order('date', { ascending: false }); // เรียงบิลล่าสุดขึ้นก่อน (ไม่ต้องมา sort เองทีหลัง)
 
-          setIsDbReady(true); // เปลี่ยนสถานะเป็นโหลดเสร็จแล้ว
-          console.log('Firebase data loaded successfully.');
+          if (billError) throw billError;
+
+          // 4. อัปเดตข้อมูลเข้า State ของแอป
+          setProducts(loadedProducts || []);
+          setBills(loadedBills || []);
+
+          setIsDbReady(true);
+          console.log('Supabase data loaded successfully.');
         } catch (e) {
           console.error("Initial data load failed:", e);
           setPopupContent({
             title: "ข้อผิดพลาด",
-            message: "ไม่สามารถดึงข้อมูลจาก Cloud ได้ กรุณาเช็คอินเทอร์เน็ตหรือ Firebase Rules"
+            message: "ไม่สามารถดึงข้อมูลจาก Supabase ได้: " + e.message
           });
           setShowPopup(true);
           setIsDbReady(true);
