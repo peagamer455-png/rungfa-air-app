@@ -47,11 +47,6 @@
     const SUPABASE_KEY = 'sb_publishable_gRRbefqAR-IUFIOPBWI71A_I8j-rTYJ';       // ก๊อปมาจากหน้า Settings > API (anon key)
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // เชื่อมต่อ Cloud
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    const db = firebase.firestore();
 
     const PRODUCT_STORE = 'products';
     const BILL_STORE = 'bills';
