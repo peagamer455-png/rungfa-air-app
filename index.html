@@ -3781,17 +3781,26 @@
             const totalItems = (importedData.bills?.length || 0) + (importedData.products?.length || 0);
 
             if (totalItems === 0) return alert("ไม่พบข้อมูลในไฟล์ครับ");
-            if (!confirm(`กำลังจะนำเข้าข้อมูล ${totalItems} รายการ ข้อมูลเดิมจะถูกเขียนทับ นายแน่ใจนะ?`)) return;
+            if (!confirm(`กำลังจะย้ายข้อมูลร้านรุ่งฟ้าแอร์ ${totalItems} รายการ นายพร้อมนะ?`)) return;
 
-            setIsImporting(true); // เปิดหน้าจอโหลด
-            setImportProgress(0); // เริ่มที่ 0%
+            setIsImporting(true);
+            setImportProgress(0);
             let processed = 0;
 
             // 1. นำเข้าสินค้า
             if (importedData.products) {
               for (const item of importedData.products) {
-                // ใช้ตัวแปร PRODUCT_STORE หรือ 'products' ให้ตรงกับในตาราง
-                await _supabase.from('products').upsert(item);
+                // กรองข้อมูลให้สะอาดก่อนส่ง
+                const { error } = await _supabase.from('products').upsert({
+                  name: item.name || "ไม่มีชื่อสินค้า",
+                  price: parseFloat(item.price) || 0,
+                  cost: parseFloat(item.cost) || 0,
+                  stock: parseInt(item.stock) || 0,
+                  barcode: String(item.barcode || ""),
+                  unit: item.unit || "ชิ้น"
+                }, { onConflict: 'barcode' }); // ถ้าบาร์โค้ดซ้ำ ให้เขียนทับของเก่า
+
+                if (error) console.error("Error products:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
               }
@@ -3800,25 +3809,30 @@
             // 2. นำเข้าบิล
             if (importedData.bills) {
               for (const item of importedData.bills) {
-                // ใช้ตัวแปร BILL_STORE หรือ 'bills' ให้ตรงกับในตาราง
-                await _supabase.from('bills').upsert(item);
+                const { error } = await _supabase.from('bills').upsert({
+                  billNumber: String(item.billNumber || ""),
+                  date: item.date || new Date().toISOString(),
+                  customerName: item.customerName || "ลูกค้าทั่วไป",
+                  items: Array.isArray(item.items) ? item.items : [], // ตรงนี้ต้องเป็น JSONB ใน Supabase
+                  total: parseFloat(item.total) || 0,
+                  discount: parseFloat(item.discount) || 0,
+                  netTotal: parseFloat(item.netTotal) || 0
+                });
+
+                if (error) console.error("Error bills:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
               }
             }
 
             setIsImporting(false);
-            alert("📥 นำเข้าข้อมูลสำเร็จทั้งหมดแล้วครับ!");
-
-            // ใช้ loadData เพื่อดึงข้อมูลใหม่มาโชว์ทันที โดยไม่ต้องโหลดหน้าเว็บใหม่
-            if (typeof loadData === 'function') {
-              await loadData();
-            }
+            alert("📥 นำเข้าข้อมูลสำเร็จแล้วครับนาย!");
+            loadData(); // สั่งโหลดข้อมูลใหม่มาโชว์ทันที
 
           } catch (error) {
-            console.error(error);
+            console.error("Import Error:", error);
             setIsImporting(false);
-            alert("ไฟล์ไม่ถูกต้องหรือระบบขัดข้อง: " + error.message);
+            alert("ไฟล์ไม่ถูกต้อง หรือโครงสร้างฐานข้อมูลไม่ตรง: " + error.message);
           }
         };
         reader.readAsText(file);
