@@ -880,28 +880,28 @@
       useEffect(() => {
         loadData();
 
-        // ฟังก์ชันฟังการเปลี่ยนแปลงข้อมูล (Realtime) ของ Supabase
-        React.useEffect(() => {
-          if (!isDbReady) return;
+        // ดักฟังข้อมูลสินค้าแบบ Real-time
+        const unsubProducts = subscribeData(PRODUCT_STORE, (data) => {
+          // [แก้ไขจุดนี้] บังคับให้เรียงลำดับตาม ID แบบตัวเลข
+          const sorted = [...data].sort((a, b) => {
+            const idA = Number(a.id) || 0;
+            const idB = Number(b.id) || 0;
+            return idA - idB; // เรียงจากน้อยไปมาก
+          });
+          setProducts(sorted);
+        });
 
-          // สร้างช่องสัญญาณ (Channel) เพื่อฟัง table 'bills' และ 'products'
-          const channel = _supabase
-            .channel('schema-db-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'bills' }, (payload) => {
-              console.log('ข้อมูลบิลมีการเปลี่ยนแปลง:', payload);
-              loadData(); // เรียกดึงข้อมูลใหม่มาโชว์
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
-              console.log('ข้อมูลสินค้ามีการเปลี่ยนแปลง:', payload);
-              loadData(); // เรียกดึงข้อมูลใหม่มาโชว์
-            })
-            .subscribe();
+        const unsubBills = subscribeData(BILL_STORE, (data) => {
+          // ส่วนของบิลให้เรียงตามวันที่ (ใหม่ไปเก่า)
+          const sorted = [...data].sort((a, b) => new Date(b.date) - new Date(a.date));
+          setBills(sorted);
+        });
 
-          return () => {
-            _supabase.removeChannel(channel);
-          };
-        }, [isDbReady, loadData]);
-      });
+        return () => {
+          unsubProducts();
+          unsubBills();
+        };
+      }, [loadData]);
 
       useEffect(() => {
         loadPdfLibs();
