@@ -3781,7 +3781,7 @@
             const totalItems = (importedData.bills?.length || 0) + (importedData.products?.length || 0);
 
             if (totalItems === 0) return alert("ไม่พบข้อมูลในไฟล์ครับ");
-            if (!confirm(`กำลังจะย้ายข้อมูลร้านรุ่งฟ้าแอร์ ${totalItems} รายการ นายพร้อมนะ?`)) return;
+            if (!confirm(`กำลังนำเข้าข้อมูล ${totalItems} รายการ ข้อมูลเดิมใน Supabase จะถูกเขียนทับ นายพร้อมนะ?`)) return;
 
             setIsImporting(true);
             setImportProgress(0);
@@ -3790,49 +3790,47 @@
             // 1. นำเข้าสินค้า
             if (importedData.products) {
               for (const item of importedData.products) {
-                // กรองข้อมูลให้สะอาดก่อนส่ง
                 const { error } = await _supabase.from('products').upsert({
-                  name: item.name || "ไม่มีชื่อสินค้า",
+                  name: item.name || "ไม่มีชื่อ",
                   price: parseFloat(item.price) || 0,
                   cost: parseFloat(item.cost) || 0,
                   stock: parseInt(item.stock) || 0,
                   barcode: String(item.barcode || ""),
-                  unit: item.unit || "ชิ้น"
-                }, { onConflict: 'barcode' }); // ถ้าบาร์โค้ดซ้ำ ให้เขียนทับของเก่า
-
-                if (error) console.error("Error products:", error.message);
+                  unit: String(item.unit || "ชิ้น")
+                });
+                if (error) console.error("Product Error:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
               }
             }
 
-            // 2. นำเข้าบิล
+            // 2. นำเข้าบิล (ปรับตามโครงสร้างข้อมูลจริงของนาย)
             if (importedData.bills) {
               for (const item of importedData.bills) {
                 const { error } = await _supabase.from('bills').upsert({
-                  billNumber: String(item.billNumber || ""),
-                  date: item.date || new Date().toISOString(),
-                  customerName: item.customerName || "ลูกค้าทั่วไป",
-                  items: Array.isArray(item.items) ? item.items : [], // ตรงนี้ต้องเป็น JSONB ใน Supabase
-                  total: parseFloat(item.total) || 0,
+                  id: item.id, // ใช้ ID เดิมจาก Firebase ได้เลย
+                  date: item.date,
+                  customerName: item.customer || "ลูกค้าทั่วไป", // เปลี่ยนจาก customer เป็น customerName
+                  items: item.items || [],
+                  total: parseFloat(item.totalSale) || 0, // เปลี่ยนจาก totalSale เป็น total
                   discount: parseFloat(item.discount) || 0,
-                  netTotal: parseFloat(item.netTotal) || 0
+                  netTotal: parseFloat(item.totalSale) || 0, // หรือคำนวณใหม่ถ้ามีส่วนลด
+                  status: item.status || "completed"
                 });
-
-                if (error) console.error("Error bills:", error.message);
+                if (error) console.error("Bill Error:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
               }
             }
 
             setIsImporting(false);
-            alert("📥 นำเข้าข้อมูลสำเร็จแล้วครับนาย!");
-            loadData(); // สั่งโหลดข้อมูลใหม่มาโชว์ทันที
+            alert("📥 ข้อมูลร้านรุ่งฟ้าแอร์ย้ายเข้า Supabase สำเร็จแล้วนาย!");
+            loadData();
 
           } catch (error) {
             console.error("Import Error:", error);
             setIsImporting(false);
-            alert("ไฟล์ไม่ถูกต้อง หรือโครงสร้างฐานข้อมูลไม่ตรง: " + error.message);
+            alert("ไฟล์ไม่ถูกต้อง: " + error.message);
           }
         };
         reader.readAsText(file);
