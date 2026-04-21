@@ -454,17 +454,31 @@
       });
       const [searchTerm, setSearchTerm] = React.useState('');
 
-      const fetchPromotions = async () => {
-        const snapshot = await loadData(PROMO_STORE).get();
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        if (data) {
-          const sortedData = data.sort((a, b) => a.name.localeCompare(b.name, 'th'));
-          setPromotions(sortedData);
-        } else {
-          setPromotions([]);
+      const fetchPromotions = useCallback(async () => {
+        try {
+          // ถ้าใน Supabase นายยังไม่ได้สร้างตารางชื่อ promotions ให้คอมเมนต์บรรทัดข้างล่างนี้ไว้ครับ
+          const { data, error } = await _supabase.from('promotions').select('*');
+          if (error) {
+            console.warn("ยังไม่มีตาราง promotions ใน Supabase หรือยังไม่ได้ตั้งค่า");
+            return;
+          }
+          setPromotions(data || []);
+        } catch (e) {
+          console.error("fetchPromotions Error:", e);
         }
-      };
+      }, []);
+
+      // 2. ปรับปรุง useEffect หลัก ให้เรียก loadData อย่างปลอดภัย
+      React.useEffect(() => {
+        const initApp = async () => {
+          if (typeof loadData === 'function') {
+            await loadData();
+          }
+          // ถ้ายังไม่มีตารางโปรโมชั่น ให้เอาเครื่องหมาย // ข้างหน้าออกเมื่อสร้างเสร็จ
+          // await fetchPromotions(); 
+        };
+        initApp();
+      }, [loadData]);
 
       React.useEffect(() => {
         fetchPromotions();
