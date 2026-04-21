@@ -140,8 +140,29 @@
     };
 
     const deleteData = async (storeName, id) => {
-      await db.collection(storeName).doc(String(id)).delete();
-      return true;
+      try {
+        // 1. ระบุชื่อตารางให้ตรงกับ Supabase (ตรวจสอบจาก storeName เดิม)
+        const tableName = (storeName === BILL_STORE) ? 'bills' : 'products';
+
+        // 2. สั่งลบข้อมูลใน Supabase โดยใช้ id
+        const { error } = await _supabase
+          .from(tableName)
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        console.log(`ลบข้อมูลจาก ${tableName} (ID: ${id}) สำเร็จ`);
+
+        // 3. หลังจากลบเสร็จ ให้ดึงข้อมูลใหม่มาอัปเดตหน้าจอทันที
+        await loadData();
+
+        return true;
+      } catch (err) {
+        console.error("Delete Error:", err.message);
+        alert("ไม่สามารถลบข้อมูลได้: " + err.message);
+        return false;
+      }
     };
 
     // --- 2. jsPDF & autoTable CDN Loading ---
