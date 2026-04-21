@@ -888,6 +888,8 @@
       useEffect(() => {
         loadPdfLibs();
 
+        const unsubProducts = loadData(PRODUCT_STORE, (data) => setProducts(data));
+        const unsubBills = loadData(BILL_STORE, (data) => setBills(data));
 
         return () => {
           unsubProducts();
@@ -3773,6 +3775,7 @@
             // 1. นำเข้าสินค้า
             if (importedData.products) {
               for (const item of importedData.products) {
+                // ใช้ตัวแปร PRODUCT_STORE หรือ 'products' ให้ตรงกับในตาราง
                 await _supabase.from('products').upsert(item);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
@@ -3782,6 +3785,7 @@
             // 2. นำเข้าบิล
             if (importedData.bills) {
               for (const item of importedData.bills) {
+                // ใช้ตัวแปร BILL_STORE หรือ 'bills' ให้ตรงกับในตาราง
                 await _supabase.from('bills').upsert(item);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
@@ -3790,7 +3794,11 @@
 
             setIsImporting(false);
             alert("📥 นำเข้าข้อมูลสำเร็จทั้งหมดแล้วครับ!");
-            window.location.reload();
+
+            // ใช้ loadData เพื่อดึงข้อมูลใหม่มาโชว์ทันที โดยไม่ต้องโหลดหน้าเว็บใหม่
+            if (typeof loadData === 'function') {
+              await loadData();
+            }
 
           } catch (error) {
             console.error(error);
