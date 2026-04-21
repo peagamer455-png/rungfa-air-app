@@ -43,15 +43,9 @@
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
     // --- 1. Firebase Configuration & Helpers ---
-    const firebaseConfig = {
-      apiKey: "AIzaSyDHXicnk7hX0W2NjQeq8JuQqKMYk9PgI8M",
-      authDomain: "rungfaairshop.firebaseapp.com",
-      projectId: "rungfaairshop",
-      storageBucket: "rungfaairshop.firebasestorage.app",
-      messagingSenderId: "345626163320",
-      appId: "1:345626163320:web:c41442f08ff7683c91158d",
-      measurementId: "G-ZQM08BTWJ9"
-    };
+    const SUPABASE_URL = 'https://hrjvuxwttlrlhjqademi.supabase.co'; // ก๊อปมาจากหน้า Settings > API
+    const SUPABASE_KEY = 'sb_publishable_gRRbefqAR-IUFIOPBWI71A_I8j-rTYJ';       // ก๊อปมาจากหน้า Settings > API (anon key)
+    const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     // เชื่อมต่อ Cloud
     if (!firebase.apps.length) {
