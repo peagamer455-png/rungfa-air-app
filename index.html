@@ -1497,7 +1497,7 @@
 
       // --- 7. Dashboard View ---
 
-      const DashboardView = () => {
+      const DashboardView = ({ exportData, importData }) => {
         // BillCard ถูกย้ายมาเป็น component ภายใน DashboardView เพื่อให้สามารถใช้ props ภายในได้
         const BillCard = ({ bill }) => {
           const billDate = new Date(bill.date);
@@ -1641,6 +1641,28 @@
                 icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>}
                 mask={true} // กำไร = ข้อมูล sensitive
               />
+              {/* ปุ่มสำหรับย้ายเครื่อง (เครื่องเก่า -> เครื่องใหม่) */}
+              <div className="mt-8 p-6 bg-blue-50 rounded-2xl border border-blue-200 shadow-sm">
+                <h3 className="text-lg font-bold text-blue-800 mb-1">📦 ระบบย้ายข้อมูลร้านรุ่งฟ้าแอร์</h3>
+                <p className="text-sm text-blue-600 mb-4">ดาวน์โหลดข้อมูลจากเครื่องเก่า แล้วเอาไป "นำเข้า" ที่เครื่องใหม่ได้เลย</p>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={exportData}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition shadow-sm"
+                  >
+                    📤 1. ดาวน์โหลดข้อมูล (เครื่องเก่า)
+                  </button>
+                  <div className="relative">
+                    <input type="file" id="importInputDash" onChange={importData} className="hidden" accept=".json" />
+                    <button
+                      onClick={() => document.getElementById('importInputDash').click()}
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 transition shadow-sm"
+                    >
+                      📥 2. นำเข้าข้อมูล (เครื่องใหม่)
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Today's Bills List */}
@@ -3749,7 +3771,12 @@
 
         switch (currentPage) {
           case 'dashboard':
-            return <DashboardView />;
+            return (
+              <DashboardView 
+                exportData={exportData} 
+                importData={importData} 
+              />
+            );
           case 'addBill':
             return <AddBillView />;
           case 'promotions':
@@ -3757,8 +3784,8 @@
               <PromotionView
                 products={products}
                 loadData={loadData}
-                setPopupContent={setPopupContent} // เพิ่มตัวนี้
-                setShowPopup={setShowPopup}       // เพิ่มตัวนี้
+                setPopupContent={setPopupContent}
+                setShowPopup={setShowPopup}
               />
             );
           case 'manageProducts':
@@ -3767,18 +3794,25 @@
             return <BillDetailView />;
           case 'editBill':
             return <EditBillView />;
-          // [NEW] เพิ่มการรองรับหน้าประวัติบิล
           case 'billHistory':
             return <BillHistoryView />;
-          default:
-            return <DashboardView />;
           case 'overview':
             return (
               <OverviewDashboard
                 bills={bills}
+                products={products}
+                exportData={exportData}
+                importData={importData}
                 formatCurrency={formatCurrency}
                 openPasswordModal={openPasswordModal}
                 setCurrentPage={setCurrentPage}
+              />
+            );
+          default:
+            return (
+              <DashboardView 
+                exportData={exportData} 
+                importData={importData} 
               />
             );
         }
