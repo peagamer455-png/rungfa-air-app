@@ -1564,7 +1564,7 @@
                 <div className="text-sm font-semibold text-gray-500">
                   {isToday ? 'บิลวันนี้' : formatDate(bill.date)}
                 </div>
-                <h4 className="text-lg font-bold text-green-700 truncate">บิลที่แก้แล้ว: #{bill.billNumber}</h4>
+                <h4 className="text-lg font-bold text-green-700 truncate">บิลที่: #{bill.billNumber}</h4>
                 <p className="text-sm text-gray-600 truncate">ลูกค้า/ช่าง: {bill.customer || 'ไม่ระบุ'}</p>
                 {/* *** แก้ไข: ลบการแสดงกำไรออกจากหน้า Dashboard ตามคำขอ ***
                     <p className="text-sm font-bold text-red-500">กำไร: {formatCurrency(bill.totalProfit)}</p>
@@ -3545,7 +3545,7 @@
 
         return (
           <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
-            <Header title={`รายละเอียดบิล #${bill.id}`} />
+            <Header title={`รายละเอียดบิล #{bill.billNumber}`} />
 
             <div className="max-w-3xl mx-auto mt-6">
               {/* Bill Info Card */}
