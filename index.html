@@ -3451,6 +3451,10 @@
       const handlePrintBill = (billData) => {
         try {
           const totalBeforeDiscount = billData.items.reduce((acc, item) => acc + (item.price * item.qty), 0);
+          const rawBillNo = billData.billNumber || billData.no || "";
+          const cleanBillNo = String(rawBillNo).replace(/[^\x20-\x7Eก-ฮะ-์]/g, '').trim();
+          // 2. ถ้าหาเลขบิลไม่เจอจริงๆ (เป็นค่าว่าง) ให้ใส่คำว่า "no-number" แทนไอดีประหลาด
+          const fileIdentifier = cleanBillNo || "000";
           // 2. คำนวณหาส่วนลด (ราคารวม - ยอดขายจริง)
           const totalDiscount = totalBeforeDiscount - billData.totalSale;
           // สร้าง HTML สำหรับ PDF (A5 landscape 210mm × 148mm)
@@ -3528,12 +3532,6 @@
                         </div>
                     </div>
                 `;
-
-          const rawBillNo = billData.billNumber || billData.no || "";
-          const cleanBillNo = String(rawBillNo).replace(/[^\x20-\x7Eก-ฮะ-์]/g, '').trim();
-
-          // 2. ถ้าหาเลขบิลไม่เจอจริงๆ (เป็นค่าว่าง) ให้ใส่คำว่า "no-number" แทนไอดีประหลาด
-          const fileIdentifier = cleanBillNo || "000";
 
           const opt = {
             margin: 1,
