@@ -3098,7 +3098,7 @@
 
             setPopupContent({
               title: "บันทึกการแก้ไขสำเร็จ",
-              message: `แก้ไขบิลเลขที่ {bill.billNumber} เรียบร้อยแล้ว`,
+              message: `แก้ไขบิลเลขที่ ${bill.billNumber} เรียบร้อยแล้ว`,
               actions: [
                 { label: "ปิดหน้าต่าง", handler: () => { setShowPopup(false); navigateTo('dashboard'); } },
                 {
@@ -3232,7 +3232,7 @@
 
         return (
           <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
-            <Header title={`✏️ แก้ไขบิลเลขที่ #${billToEdit.id}`} />
+            <Header title={`✏️ แก้ไขบิลเลขที่ #{billToEdit.id}`} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
               {/* Left Column: Inputs & Search */}
               <div className="lg:col-span-2 space-y-4">
