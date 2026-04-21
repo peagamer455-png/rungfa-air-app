@@ -454,6 +454,7 @@
       });
       const [searchTerm, setSearchTerm] = React.useState('');
 
+      // 1. แก้ไข fetchPromotions ให้รองรับทั้ง Supabase และกัน Error
       const fetchPromotions = useCallback(async () => {
         try {
           // ถ้าใน Supabase นายยังไม่ได้สร้างตารางชื่อ promotions ให้คอมเมนต์บรรทัดข้างล่างนี้ไว้ครับ
@@ -478,7 +479,7 @@
           // await fetchPromotions(); 
         };
         initApp();
-      }, [loadData]);
+      }, [loadData]); // ลบ fetchPromotions ออกจาก dependency ตรงนี้ก่อนเพื่อกัน Loop
 
       React.useEffect(() => {
         fetchPromotions();
