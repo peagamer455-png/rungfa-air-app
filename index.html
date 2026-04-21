@@ -53,14 +53,9 @@
     const PROMO_STORE = 'promotions';
 
     // ดึงข้อมูลแบบ Real-time (เครื่องอื่นแก้ เครื่องเราเปลี่ยนทันที)
-    const subscribeData = (storeName, callback) => {
-      return loadData(storeName).onSnapshot((snapshot) => {
-        const data = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        callback(data);
-      });
+    const subscribeData = () => {
+      console.log("ระบบกำลังเปลี่ยนไปใช้ Supabase Realtime...");
+      return () => {}; 
     };
 
     // บันทึก/แก้ไขข้อมูล (เพิ่มที่เก็บสินค้าได้เลย)
