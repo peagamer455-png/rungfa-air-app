@@ -445,7 +445,7 @@
       const fetchPromotions = async () => {
         const snapshot = await db.collection(PROMO_STORE).get();
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
+
         if (data) {
           const sortedData = data.sort((a, b) => a.name.localeCompare(b.name, 'th'));
           setPromotions(sortedData);
@@ -478,20 +478,19 @@
       const deletePromo = async (id) => {
         setPopupContent({
           title: '❓ ยืนยันการลบ',
-          message: 'คุณต้องการลบโปรโมชั่นนี้ใช่หรือไม่? การลบแล้วไม่สามารถย้อนคืนได้',
+          message: 'คุณต้องการลบโปรโมชั่นนี้ใช่หรือไม่?',
           actions: [
             {
               label: 'ยกเลิก',
-              handler: () => setShowPopup(false), // เปลี่ยนจาก handler เป็น onClick
-              variant: 'secondary' // สีเทา
+              handler: () => setShowPopup(false),
+              variant: 'secondary'
             },
             {
               label: 'ยืนยันการลบ',
-              handler: async () => { // เปลี่ยนจาก handler เป็น onClick
+              handler: async () => {
                 try {
-                  const db = await openDB();
-                  const tx = db.transaction('promotions', 'readwrite');
-                  await tx.objectStore('promotions').delete(id);
+                  // เปลี่ยนมาใช้ deleteData ของ Firebase ที่มีอยู่ในไฟล์แล้ว
+                  await deleteData(PROMO_STORE, id);
                   setShowPopup(false);
                   fetchPromotions();
                 } catch (err) {
@@ -499,7 +498,7 @@
                   setShowPopup(false);
                 }
               },
-              variant: 'danger' // ระบบจะเปลี่ยนเป็นสีแดง (bg-red-600) ให้โดยอัตโนมัติ
+              variant: 'danger'
             }
           ]
         });
