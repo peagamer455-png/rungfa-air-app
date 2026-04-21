@@ -3902,6 +3902,36 @@
           )}
           {/* Password confirm modal replaces all prompt() calls */}
           {showPasswordModal && <PasswordConfirmModal />}
+
+          {isImporting && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center border border-gray-100">
+                <div className="mb-4 text-xl font-bold text-gray-800">กำลังย้ายข้อมูลเข้า Supabase</div>
+
+                {/* หลอดโหลด */}
+                <div className="w-full bg-gray-200 rounded-full h-4 mb-3 overflow-hidden shadow-inner">
+                  <div
+                    className="bg-blue-600 h-full transition-all duration-300 ease-out"
+                    style={{ width: `${importProgress}%` }}
+                  ></div>
+                </div>
+
+                <div className="text-blue-600 font-mono font-bold text-3xl mb-2">{importProgress}%</div>
+                <p className="text-gray-500 text-sm italic">รอแป๊บนึงนะนาย ข้อมูลกำลังไหลเข้า...</p>
+              </div>
+            </div>
+          )}
+
+          {/* --- โค้ด Modal เดิมที่นายมีอยู่แล้ว --- */}
+          {showPopup && popupContent && (
+            <ModalPopup
+              title={popupContent.title}
+              message={popupContent.message}
+              onClose={() => setShowPopup(false)}
+              actions={popupContent.actions}
+            />
+          )}
+          {showPasswordModal && <PasswordConfirmModal />}
         </div>
       )
     };
