@@ -720,6 +720,8 @@
       const [currentBillId, setCurrentBillId] = useState(null);
       const [isSidebarOpen, setIsSidebarOpen] = useState(false);
       const [showPopup, setShowPopup] = useState(false);
+      const [isImporting, setIsImporting] = React.useState(false);
+      const [importProgress, setImportProgress] = React.useState(0);
       const [popupContent, setPopupContent] = useState(null);
       // --- Sensitive display (กำไร/ต้นทุน) ---
       const [sensitiveVisible, setSensitiveVisible] = useState(false);
@@ -3784,18 +3786,41 @@
         reader.onload = async (e) => {
           try {
             const importedData = JSON.parse(e.target.result);
-            if (confirm("⚠️ ข้อมูลเดิมจะถูกเขียนทับ นายแน่ใจนะ?")) {
-              if (importedData.bills) {
-                for (const bill of importedData.bills) await putData(BILL_STORE, bill);
+            const totalItems = (importedData.bills?.length || 0) + (importedData.products?.length || 0);
+
+            if (totalItems === 0) return alert("ไม่พบข้อมูลในไฟล์ครับ");
+            if (!confirm(`กำลังจะนำเข้าข้อมูล ${totalItems} รายการ ข้อมูลเดิมจะถูกเขียนทับ นายแน่ใจนะ?`)) return;
+
+            setIsImporting(true); // เปิดหน้าจอโหลด
+            setImportProgress(0); // เริ่มที่ 0%
+            let processed = 0;
+
+            // 1. นำเข้าสินค้า
+            if (importedData.products) {
+              for (const item of importedData.products) {
+                await _supabase.from('products').upsert(item);
+                processed++;
+                setImportProgress(Math.round((processed / totalItems) * 100));
               }
-              if (importedData.products) {
-                for (const product of importedData.products) await putData(PRODUCT_STORE, product);
-              }
-              alert("📥 นำเข้าข้อมูลสำเร็จ!");
-              window.location.reload();
             }
+
+            // 2. นำเข้าบิล
+            if (importedData.bills) {
+              for (const item of importedData.bills) {
+                await _supabase.from('bills').upsert(item);
+                processed++;
+                setImportProgress(Math.round((processed / totalItems) * 100));
+              }
+            }
+
+            setIsImporting(false);
+            alert("📥 นำเข้าข้อมูลสำเร็จทั้งหมดแล้วครับ!");
+            window.location.reload();
+
           } catch (error) {
-            alert("ไฟล์ไม่ถูกต้อง: " + error.message);
+            console.error(error);
+            setIsImporting(false);
+            alert("ไฟล์ไม่ถูกต้องหรือระบบขัดข้อง: " + error.message);
           }
         };
         reader.readAsText(file);
