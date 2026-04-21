@@ -888,8 +888,6 @@
       useEffect(() => {
         loadPdfLibs();
 
-        const unsubProducts = subscribeData(PRODUCT_STORE, (data) => setProducts(data));
-        const unsubBills = subscribeData(BILL_STORE, (data) => setBills(data));
 
         return () => {
           unsubProducts();
