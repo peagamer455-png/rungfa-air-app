@@ -838,6 +838,7 @@
       };
 
       // --- Data Fetching and Initialization ---
+
       const loadData = useCallback(async () => {
         try {
           // 1. โหลด library สำหรับ PDF (ของเดิมนาย)
@@ -894,6 +895,7 @@
           _supabase.removeChannel(channel);
         };
       }, [isDbReady, loadData]);
+
 
       useEffect(() => {
         loadPdfLibs();
