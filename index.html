@@ -3098,7 +3098,7 @@
 
             setPopupContent({
               title: "บันทึกการแก้ไขสำเร็จ",
-              message: `แก้ไขบิลเลขที่ ${bill.billNumber} เรียบร้อยแล้ว`,
+              message: `แก้ไขบิลเลขที่ ${bill.id} เรียบร้อยแล้ว`,
               actions: [
                 { label: "ปิดหน้าต่าง", handler: () => { setShowPopup(false); navigateTo('dashboard'); } },
                 {
@@ -3545,7 +3545,7 @@
 
         return (
           <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
-            <Header title={`รายละเอียดบิล #${bill.id}`} />
+            <Header title={`รายละเอียดบิล #{bill.id}`} />
 
             <div className="max-w-3xl mx-auto mt-6">
               {/* Bill Info Card */}
