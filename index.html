@@ -1246,7 +1246,7 @@
         }, [bills, filterTerm, dateFrom, dateTo]);
 
         // คำนวณจำนวนหน้าทั้งหมด
-        const totalPages = Math.ceil(totalBillsCount / itemsPerPage);
+        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
 
         // ดึงรายการสำหรับหน้าปัจจุบัน
         const currentBills = useMemo(() => {
