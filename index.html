@@ -856,7 +856,8 @@
           const { data: bData, error: bError } = await _supabase
             .from(BILL_STORE)
             .select('*')
-            .order('date', { ascending: false });
+            .order('date', { ascending: false })
+            .limit(10000);
 
           if (bError) throw bError;
 
