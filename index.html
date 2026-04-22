@@ -443,7 +443,7 @@
     );
 
     // --- Promotion View (เวอร์ชันใช้ Popup ของระบบ) ---
-    const PromotionView = ({ products, loadData, setPopupContent, setShowPopup }) => {
+    const PromotionView = ({ products, setPopupContent, setShowPopup }) => {
       const [promotions, setPromotions] = React.useState([]);
       const [formData, setFormData] = React.useState({
         name: '',
@@ -722,11 +722,6 @@
       const [isImporting, setIsImporting] = React.useState(false);
       const [importProgress, setImportProgress] = React.useState(0);
       const [popupContent, setPopupContent] = useState(null);
-      const [totalBillsCount, setTotalBillsCount] = useState(0);
-      const filteredBills = useMemo(() => bills, [bills]);
-      const handleEditBill = (bill) => editBill(bill);
-      const handleDeleteBill = (id) => deleteBill(id);
-      const handleViewBill = (bill) => viewBill(bill);
       // --- Sensitive display (กำไร/ต้นทุน) ---
       const [sensitiveVisible, setSensitiveVisible] = useState(false);
       const SENSITIVE_PASSWORD = '261250'; // <-- เปลี่ยนรหัสตรงนี้ตามต้องการ
@@ -849,40 +844,32 @@
       // --- Data Fetching and Initialization ---
 
       // --- 1. ประกาศ loadData ไว้ข้างบนสุด เพื่อให้ตัวอื่นเรียกใช้ได้ ---
-      const loadData = useCallback(async (page = 1) => {
+      const loadData = useCallback(async () => {
         try {
-          const itemsPerPage = 14;
-          const start = (page - 1) * itemsPerPage;
-          const end = start + itemsPerPage - 1;
+          if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // 1. สินค้า: ดึงมาตุนไว้ (Stock) เพราะมีไม่เยอะเท่าบิล
-          const { data: pData } = await _supabase
+          // ดึงข้อมูลสินค้า
+          const { data: pData, error: pError } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
-            .order('name', { ascending: true })
-            .limit(5000); // ใส่ลิมิตเผื่อไว้เยอะๆ ได้เลยครับ
+            .order('name', { ascending: true });
 
-          // 2. บิล: ดึงเฉพาะช่วง (Range) เพื่อรองรับข้อมูลหลักแสนใบ
-          const { data: bData, error: bError, count } = await _supabase
+          // ดึงข้อมูลบิล
+          const { data: bData, error: bError } = await _supabase
             .from(BILL_STORE)
-            .select('*', { count: 'exact' }) // สั่งให้นับจำนวนบิลทั้งหมดใน DB มาด้วย
-            .order('date', { ascending: false })
-            .range(start, end); // ดึงเฉพาะ 14 ใบของหน้านั้นๆ
+            .select('*')
+            .order('date', { ascending: false });
 
+          if (pError) throw pError;
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
-          setCurrentPage(page);
-
-          // เก็บจำนวนบิลทั้งหมด (เช่น 100,000) ไว้คำนวณหน้า
-          if (count !== null) {
-            setTotalBillsCount(count);
-          }
-
           setIsDbReady(true);
+          console.log('โหลดข้อมูลจาก Supabase สำเร็จ');
         } catch (e) {
           console.error("โหลดข้อมูลไม่สำเร็จ:", e);
+          setIsDbReady(true);
         }
       }, []);
 
@@ -899,30 +886,31 @@
           .channel('db-realtime')
           .on('postgres_changes', { event: '*', schema: 'public', table: BILL_STORE }, () => {
             console.log('บิลมีการอัปเดต...');
-            // ถ้ามีการเพิ่มบิลใหม่ ให้โหลดข้อมูลหน้าปัจจุบันที่นายกำลังดูอยู่ใหม่
-            loadData(currentPage);
+            loadData();
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: PRODUCT_STORE }, () => {
             console.log('สินค้ามีการอัปเดต...');
-            // สินค้าดึงใหม่ทั้งหมดได้เลยเพราะเราทำแบบ Stock (Limit สูงๆ)
-            loadData(currentPage);
+            loadData();
           })
           .subscribe();
 
         return () => {
-          if (channel) _supabase.removeChannel(channel);
+          _supabase.removeChannel(channel);
         };
-      }, [isDbReady, loadData, currentPage]); // เพิ่ม currentPage ใน dependency ด้วยครับ
+      }, [isDbReady, loadData]);
 
 
-      React.useEffect(() => {
+      useEffect(() => {
         loadPdfLibs();
-        loadData(1);
+
+        const unsubProducts = loadData(PRODUCT_STORE, (data) => setProducts(data));
+        const unsubBills = loadData(BILL_STORE, (data) => setBills(data));
 
         return () => {
-          console.log("ปิดหน้าจอ: ล้างข้อมูลเรียบร้อย");
+          unsubProducts();
+          unsubBills();
         };
-      }, [loadData]);
+      }, []);
 
       // ปิด autocomplete / คำแนะนำของเบราว์เซอร์ สำหรับ form / input / textarea
       useEffect(() => {
@@ -1206,30 +1194,21 @@
       };
 
       // --- 7.6. Bill History View (New Component) ---
-      const BillHistoryView = ({
-        bills,
-        totalBillsCount,
-        loadData,
-        onEditBill,
-        onDeleteBill,
-        onViewBill,
-        currentPage, // รับมาจาก App หลัก
-        setCurrentPage // รับมาจาก App หลัก
-      }) => {
+      const BillHistoryView = () => {
         const [filterTerm, setFilterTerm] = useState('');
         const [dateFrom, setDateFrom] = useState('');
         const [dateTo, setDateTo] = useState('');
-
-        const billsPerPage = 14; // ให้ตรงกับที่ตั้งไว้ใน loadData
+        // เพิ่ม state สำหรับ pagination
+        const [currentPage, setCurrentPage] = useState(1);
+        const billsPerPage = 15;
 
         // [NEW] State สำหรับยืนยันการลบประวัติ
         const [showClearConfirm, setShowClearConfirm] = useState(false);
         const [clearPassword, setClearPassword] = useState('');
         const [clearError, setClearError] = useState('');
+        // แก้ไข state สำหรับแสดง/ซ่อนรหัส
         const [clearPasswordVisible, setClearPasswordVisible] = useState(false);
 
-        // กรองข้อมูลเฉพาะที่มีอยู่ใน State (Client-side search สำหรับข้อมูลที่โหลดมาแล้ว)
-        // หมายเหตุ: ถ้าจะ Search ทั้งแสนใบ ควรส่ง filterTerm ไปใน loadData ด้วยครับนาย
         const filteredBills = useMemo(() => {
           let list = bills;
           if (filterTerm) {
@@ -1241,52 +1220,97 @@
               return false;
             });
           }
-          // ... (ส่วนกรองวันที่คงเดิม)
+
+          if (dateFrom || dateTo) {
+            const start = dateFrom ? new Date(dateFrom) : null;
+            const end = dateTo ? new Date(dateTo) : null;
+            if (start) start.setHours(0, 0, 0, 0);
+            if (end) end.setHours(23, 59, 59, 999);
+            list = list.filter(bill => {
+              const t = new Date(bill.date).getTime();
+              if (start && t < start.getTime()) return false;
+              if (end && t > end.getTime()) return false;
+              return true;
+            });
+          }
+
           return list;
         }, [bills, filterTerm, dateFrom, dateTo]);
 
-        // คำนวณจำนวนหน้าจากยอดรวมใน DB (totalBillsCount)
-        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
+        // คำนวณจำนวนหน้าทั้งหมด
+        const totalPages = Math.ceil(filteredBills.length / billsPerPage);
 
-        // Pagination Component
+        // ดึงรายการสำหรับหน้าปัจจุบัน
+        const currentBills = useMemo(() => {
+          const startIndex = (currentPage - 1) * billsPerPage;
+          return filteredBills.slice(startIndex, startIndex + billsPerPage);
+        }, [filteredBills, currentPage]);
+
+        // component สำหรับปุ่ม pagination
         const Pagination = () => {
-          const maxPageButtons = 5;
+          const maxPageButtons = 5; // จำนวนปุ่มตัวเลขที่จะแสดง
           let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
           let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
 
+          // ปรับ startPage ถ้า endPage ชนขอบ
           if (endPage - startPage + 1 < maxPageButtons) {
             startPage = Math.max(1, endPage - maxPageButtons + 1);
           }
 
           return (
-            <div className="flex justify-center items-center space-x-2 mt-6 pb-10">
+            <div className="flex justify-center items-center space-x-2 mt-6">
+              {/* ปุ่มก่อนหน้า */}
               <button
-                onClick={() => loadData(currentPage - 1)}
+                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-100 disabled:opacity-50"
+                className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
                 ←
               </button>
 
+              {/* ปุ่มหน้าแรก */}
               {startPage > 1 && (
-                <button onClick={() => loadData(1)} className="px-3 py-1 rounded-lg bg-white border">1</button>
+                <>
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    1
+                  </button>
+                  {startPage > 2 && <span className="px-2">...</span>}
+                </>
               )}
 
+              {/* ปุ่มตัวเลขหน้า */}
               {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
                 <button
                   key={page}
-                  onClick={() => loadData(page)} // เรียก loadData จริงๆ เพื่อไปดึงจาก Server
-                  className={`px-3 py-1 rounded-lg font-bold ${currentPage === page ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600'
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'
                     }`}
                 >
                   {page}
                 </button>
               ))}
 
+              {/* ปุ่มหน้าสุดท้าย */}
+              {endPage < totalPages && (
+                <>
+                  {endPage < totalPages - 1 && <span className="px-2">...</span>}
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    className={`px-3 py-1 rounded-lg ${currentPage === totalPages ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  >
+                    {totalPages}
+                  </button>
+                </>
+              )}
+
+              {/* ปุ่มถัดไป */}
               <button
-                onClick={() => loadData(currentPage + 1)}
-                disabled={currentPage >= totalPages}
-                className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-100 disabled:opacity-50"
+                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
                 →
               </button>
@@ -1428,75 +1452,76 @@
 
         return (
           <div className="p-4 sm:p-6 bg-gray-50 min-h-screen">
-            {/* ส่วนหัวและ Filter */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-              <h1 className="text-2xl font-bold text-gray-800">📜 ประวัติบิลทั้งหมด</h1>
+            <Header title="📜 ประวัติบิลทั้งหมด" />
+
+            {/* Search + date filter area */}
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="md:col-span-2">
+                <input
+                  type="text"
+                  placeholder="🔍 ค้นหาบิลด้วยเลขที่, ชื่อลูกค้า, หรือชื่อสินค้า..."
+                  value={filterTerm}
+                  onChange={(e) => {
+                    setFilterTerm(e.target.value);
+                    setCurrentPage(1); // รีเซ็ตหน้าเมื่อค้นหา
+                  }}
+                  className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500"
+                />
+              </div>
+
+              <div className="flex space-x-2">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => { setDateFrom(e.target.value); setCurrentPage(1); }}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                  title="จากวันที่"
+                />
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }}
+                  className="w-full p-2 border border-gray-300 rounded-lg"
+                  title="ถึงวันที่"
+                />
+              </div>
+            </div>
+
+            {/* ปุ่มเคลียร์ประวัติ เลื่อนลงมาและชิดขวา */}
+            <div className="mt-3 flex justify-end">
               <button
                 onClick={() => setShowClearConfirm(true)}
-                className="px-4 py-2 bg-red-500 text-white rounded-xl hover:bg-red-600 transition flex items-center w-fit"
+                className="px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-sm flex items-center"
               >
-                🗑️ เคลียร์ประวัติบิล
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                เคลียร์ประวัติบิล
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <input
-                type="text"
-                placeholder="🔍 ค้นหาบิล..."
-                value={filterTerm}
-                onChange={(e) => {
-                  setFilterTerm(e.target.value);
-                  // setCurrentPage(1); // ไม่ต้องเซ็ตตรงนี้ เพราะเราจะให้ loadData(1) จัดการ
-                }}
-                className="md:col-span-2 p-3 border rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <div className="flex gap-2">
-                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full p-3 border rounded-xl" />
-                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full p-3 border rounded-xl" />
-              </div>
-            </div>
+            <div className="mt-6">
+              <h2 className="text-xl font-bold text-green-700">
+                รายการบิลทั้งหมด ({filteredBills.length} บิล)
+                <span className="text-sm font-normal text-gray-500 ml-2">
+                  แสดง {(currentPage - 1) * billsPerPage + 1} - {Math.min(currentPage * billsPerPage, filteredBills.length)} รายการ
+                </span>
+              </h2>
 
-            <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
-              <div className="p-4 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
-                <span className="font-bold text-gray-700">รายการบิล (ทั้งหมด {totalBillsCount} ใบ)</span>
-                <span className="text-sm text-gray-500">หน้า {currentPage} / {totalPages}</span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-gray-50 text-gray-600 text-sm uppercase">
-                    <tr>
-                      <th className="p-4 font-semibold">เลขที่บิล</th>
-                      <th className="p-4 font-semibold">วันที่</th>
-                      <th className="p-4 font-semibold">ลูกค้า</th>
-                      <th className="p-4 font-semibold text-right">ยอดรวม</th>
-                      <th className="p-4 font-semibold text-center">จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {filteredBills.map(bill => (
-                      <tr key={bill.id} className="hover:bg-blue-50/30 transition-colors">
-                        <td className="p-4 font-mono text-blue-600 font-bold">{bill.id}</td>
-                        <td className="p-4 text-gray-600">{new Date(bill.date).toLocaleDateString('th-TH')}</td>
-                        <td className="p-4 font-medium text-gray-800">{bill.customer}</td>
-                        <td className="p-4 text-right font-bold text-green-600">{bill.total.toLocaleString()}.-</td>
-                        <td className="p-4">
-                          <div className="flex justify-center gap-2">
-                            <button onClick={() => onViewBill(bill)} className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg">👁️</button>
-                            <button onClick={() => onDeleteBill(bill.id)} className="p-2 text-red-600 hover:bg-red-100 rounded-lg">🗑️</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {filteredBills.length === 0 && (
-                  <div className="p-10 text-center text-gray-400 italic">ไม่พบข้อมูลบิล</div>
+              <div className="space-y-3 mt-4">
+                {currentBills.length > 0 ? (
+                  currentBills.map(bill => <HistoryBillCard key={bill.id} bill={bill} />)
+                ) : (
+                  <div className="bg-white p-6 rounded-xl shadow-md text-center text-gray-500">
+                    ไม่พบบิลตามเงื่อนไขที่ค้นหา
+                  </div>
                 )}
               </div>
+
+              {filteredBills.length > billsPerPage && <Pagination />}
             </div>
 
-            {totalPages > 1 && <Pagination />}
+            {/* แสดง Modal เมื่อกดปุ่มเคลียร์ประวัติ */}
             {showClearConfirm && <ClearHistoryModal />}
           </div>
         );
@@ -3783,21 +3808,15 @@
             if (importedData.bills) {
               for (const item of importedData.bills) {
                 const { error } = await _supabase.from('bills').upsert({
-                  id: parseInt(item.id), // บังคับเป็นตัวเลขเพื่อให้ ID บิลขึ้นถูกต้อง
+                  id: item.id, // ใช้ ID เดิมจาก Firebase ได้เลย
                   date: item.date,
-                  customerName: item.customer || "ลูกค้าทั่วไป",
-                  customerDetails: item.customerDetails || "", // รายละเอียดลูกค้า
+                  customerName: item.customer || "ลูกค้าทั่วไป", // เปลี่ยนจาก customer เป็น customerName
                   items: item.items || [],
-                  totalSale: parseFloat(item.totalSale) || 0,   // ยอดขาย (840)
-                  totalCost: parseFloat(item.totalCost) || 0,   // ทุน (694)
-                  totalProfit: parseFloat(item.totalProfit) || 0, // กำไร (146)
-                  discount: parseFloat(item.discount) || 0,      // ส่วนลด (ถ้ามี)
-                  status: item.status || "completed",
-                  // ใส่ค่าพวกนี้ไว้กันเหนียวถ้าโค้ดส่วนอื่นเรียกใช้ชื่อ total หรือ netTotal
-                  total: parseFloat(item.totalSale) || 0,
-                  netTotal: parseFloat(item.totalSale - (item.discount || 0)) || 0
+                  total: parseFloat(item.totalSale) || 0, // เปลี่ยนจาก totalSale เป็น total
+                  discount: parseFloat(item.discount) || 0,
+                  netTotal: parseFloat(item.totalSale) || 0, // หรือคำนวณใหม่ถ้ามีส่วนลด
+                  status: item.status || "completed"
                 });
-
                 if (error) console.error("Bill Error:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
@@ -3849,17 +3868,7 @@
           case 'editBill':
             return <EditBillView />;
           case 'billHistory':
-            return (
-              <BillHistoryView
-                bills={filteredBills}           // ข้อมูลบิล 14 ใบที่จะโชว์
-                totalBillsCount={totalBillsCount} // ยอดรวมบิลทั้งหมด (เช่น 3,000)
-                currentPage={currentPage}      // หน้าปัจจุบัน
-                loadData={loadData}             // ฟังก์ชันไปดึงข้อมูลจาก Supabase
-                onEditBill={handleEditBill}
-                onDeleteBill={handleDeleteBill}
-                onViewBill={handleViewBill}
-              />
-            );
+            return <BillHistoryView />;
           case 'overview':
             return (
               <OverviewDashboard
