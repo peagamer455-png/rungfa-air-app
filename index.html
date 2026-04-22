@@ -909,20 +909,13 @@
 
 
       React.useEffect(() => {
-        // 1. โหลด Lib สำหรับ PDF
         loadPdfLibs();
-
-        // 2. เรียกโหลดข้อมูลครั้งแรก (หน้า 1)
-        // ระบบใหม่จะโหลดทั้งสินค้าและบิล (14 ใบแรก) มาพร้อมกันในฟังก์ชันเดียวเลย
         loadData(1);
 
-        // 3. ส่วนการ Cleanup (ถ้าไม่ได้ทำ Realtime ในนี้ ก็ไม่ต้องมี unsub ครับ)
         return () => {
-          // ลบการเรียก unsubProducts(); และ unsubBills(); ออก
-          // เพราะ loadData ตัวใหม่ไม่ใช่ listener แล้ว
-          console.log("Cleanup: ปิดหน้าจอ");
+          console.log("ปิดหน้าจอ: ล้างข้อมูลเรียบร้อย");
         };
-      }, [loadData]); // ใส่ loadData ไว้ใน dependency
+      }, [loadData]);
 
       // ปิด autocomplete / คำแนะนำของเบราว์เซอร์ สำหรับ form / input / textarea
       useEffect(() => {
