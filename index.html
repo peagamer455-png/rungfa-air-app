@@ -1308,17 +1308,16 @@
         const [filterTerm, setFilterTerm] = useState('');
         const [dateFrom, setDateFrom] = useState('');
         const [dateTo, setDateTo] = useState('');
-        // เพิ่ม state สำหรับ pagination
-        const [currentPage, setCurrentPage] = useState(1);
+
         const billsPerPage = 15;
 
-        // [NEW] State สำหรับยืนยันการลบประวัติ
+        // [NEW] State สำหรับยืนยันการลบประวัติ (คงไว้ตามเดิม)
         const [showClearConfirm, setShowClearConfirm] = useState(false);
         const [clearPassword, setClearPassword] = useState('');
         const [clearError, setClearError] = useState('');
-        // แก้ไข state สำหรับแสดง/ซ่อนรหัส
         const [clearPasswordVisible, setClearPasswordVisible] = useState(false);
 
+        // กรองข้อมูลเบื้องต้นในหน้าปัจจุบัน
         const filteredBills = useMemo(() => {
           let list = bills;
           if (filterTerm) {
@@ -1330,39 +1329,21 @@
               return false;
             });
           }
-
-          if (dateFrom || dateTo) {
-            const start = dateFrom ? new Date(dateFrom) : null;
-            const end = dateTo ? new Date(dateTo) : null;
-            if (start) start.setHours(0, 0, 0, 0);
-            if (end) end.setHours(23, 59, 59, 999);
-            list = list.filter(bill => {
-              const t = new Date(bill.date).getTime();
-              if (start && t < start.getTime()) return false;
-              if (end && t > end.getTime()) return false;
-              return true;
-            });
-          }
-
           return list;
-        }, [bills, filterTerm, dateFrom, dateTo]);
+        }, [bills, filterTerm]);
 
-        // คำนวณจำนวนหน้าทั้งหมด
-        const totalPages = Math.ceil(filteredBills.length / billsPerPage);
+        // คำนวณจำนวนหน้าทั้งหมดจากยอดในฐานข้อมูลจริงๆ
+        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
 
-        // ดึงรายการสำหรับหน้าปัจจุบัน
-        const currentBills = useMemo(() => {
-          const startIndex = (currentPage - 1) * billsPerPage;
-          return filteredBills.slice(startIndex, startIndex + billsPerPage);
-        }, [filteredBills, currentPage]);
+        // ข้อมูลที่จะนำไปแสดง (ไม่ต้อง slice แล้วเพราะ Supabase หั่นมาให้แล้ว)
+        const currentBills = filteredBills;
 
         // component สำหรับปุ่ม pagination
         const Pagination = () => {
-          const maxPageButtons = 5; // จำนวนปุ่มตัวเลขที่จะแสดง
+          const maxPageButtons = 5;
           let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
           let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
 
-          // ปรับ startPage ถ้า endPage ชนขอบ
           if (endPage - startPage + 1 < maxPageButtons) {
             startPage = Math.max(1, endPage - maxPageButtons + 1);
           }
@@ -1374,7 +1355,7 @@
                 onClick={() => {
                   const p = Math.max(1, currentPage - 1);
                   setCurrentPage(p);
-                  loadData(p); // <--- เพิ่มตรงนี้
+                  loadData(p);
                 }}
                 disabled={currentPage === 1}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
@@ -1388,7 +1369,7 @@
                   <button
                     onClick={() => {
                       setCurrentPage(1);
-                      loadData(1); // <--- เพิ่มตรงนี้
+                      loadData(1);
                     }}
                     className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
@@ -1404,7 +1385,7 @@
                   key={page}
                   onClick={() => {
                     setCurrentPage(page);
-                    loadData(page); // <--- เพิ่มตรงนี้
+                    loadData(page);
                   }}
                   className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                 >
@@ -1419,7 +1400,7 @@
                   <button
                     onClick={() => {
                       setCurrentPage(totalPages);
-                      loadData(totalPages); // <--- เพิ่มตรงนี้
+                      loadData(totalPages);
                     }}
                     className={`px-3 py-1 rounded-lg ${currentPage === totalPages ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
@@ -1433,7 +1414,7 @@
                 onClick={() => {
                   const p = Math.min(totalPages, currentPage + 1);
                   setCurrentPage(p);
-                  loadData(p); // <--- เพิ่มตรงนี้
+                  loadData(p);
                 }}
                 disabled={currentPage === totalPages}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
