@@ -847,36 +847,38 @@
       // --- 1. ประกาศ loadData ไว้ข้างบนสุด เพื่อให้ตัวอื่นเรียกใช้ได้ ---
       const loadData = useCallback(async (page = 1) => {
         try {
-          if (typeof loadPdfLibs === 'function') await loadPdfLibs();
-
+          const itemsPerPage = 14;
           const start = (page - 1) * itemsPerPage;
           const end = start + itemsPerPage - 1;
 
-          // --- ดึงสินค้า (ดึงมาตุนไว้ทั้งหมด เพราะสินค้ามีไม่เยอะเท่าบิล) ---
+          // 1. สินค้า: ดึงมาตุนไว้ (Stock) เพราะมีไม่เยอะเท่าบิล
           const { data: pData } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true })
-            .limit(5000); // กันเหนียวไว้ 5,000 รายการ
+            .limit(5000); // ใส่ลิมิตเผื่อไว้เยอะๆ ได้เลยครับ
 
-          // --- ดึงบิล (ดึงเฉพาะหน้าปัจจุบัน) ---
+          // 2. บิล: ดึงเฉพาะช่วง (Range) เพื่อรองรับข้อมูลหลักแสนใบ
           const { data: bData, error: bError, count } = await _supabase
             .from(BILL_STORE)
-            .select('*', { count: 'exact' }) // สั่งให้นับจำนวนบิลทั้งหมดใน DB
+            .select('*', { count: 'exact' }) // สั่งให้นับจำนวนบิลทั้งหมดใน DB มาด้วย
             .order('date', { ascending: false })
-            .range(start, end); // ดึงเฉพาะช่วงใบที่ต้องการ
+            .range(start, end); // ดึงเฉพาะ 14 ใบของหน้านั้นๆ
 
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
           setCurrentPage(page);
-          if (count !== null) setTotalBillsCount(count); // เก็บยอดรวม 100,000 ใบไว้ที่นี่
+
+          // เก็บจำนวนบิลทั้งหมด (เช่น 100,000) ไว้คำนวณหน้า
+          if (count !== null) {
+            setTotalBillsCount(count);
+          }
 
           setIsDbReady(true);
         } catch (e) {
           console.error("โหลดข้อมูลไม่สำเร็จ:", e);
-          setIsDbReady(true);
         }
       }, []);
 
