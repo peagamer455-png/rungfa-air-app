@@ -893,18 +893,20 @@
           .channel('db-realtime')
           .on('postgres_changes', { event: '*', schema: 'public', table: BILL_STORE }, () => {
             console.log('บิลมีการอัปเดต...');
-            loadData();
+            // ถ้ามีการเพิ่มบิลใหม่ ให้โหลดข้อมูลหน้าปัจจุบันที่นายกำลังดูอยู่ใหม่
+            loadData(currentPage);
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: PRODUCT_STORE }, () => {
             console.log('สินค้ามีการอัปเดต...');
-            loadData();
+            // สินค้าดึงใหม่ทั้งหมดได้เลยเพราะเราทำแบบ Stock (Limit สูงๆ)
+            loadData(currentPage);
           })
           .subscribe();
 
         return () => {
-          _supabase.removeChannel(channel);
+          if (channel) _supabase.removeChannel(channel);
         };
-      }, [isDbReady, loadData]);
+      }, [isDbReady, loadData, currentPage]); // เพิ่ม currentPage ใน dependency ด้วยครับ
 
 
       React.useEffect(() => {
