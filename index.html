@@ -1371,7 +1371,11 @@
             <div className="flex justify-center items-center space-x-2 mt-6">
               {/* ปุ่มก่อนหน้า */}
               <button
-                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+                onClick={() => {
+                  const p = Math.max(1, currentPage - 1);
+                  setCurrentPage(p);
+                  loadData(p); // <--- เพิ่มตรงนี้
+                }}
                 disabled={currentPage === 1}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
@@ -1382,7 +1386,10 @@
               {startPage > 1 && (
                 <>
                   <button
-                    onClick={() => setCurrentPage(1)}
+                    onClick={() => {
+                      setCurrentPage(1);
+                      loadData(1); // <--- เพิ่มตรงนี้
+                    }}
                     className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
                     1
@@ -1395,9 +1402,11 @@
               {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
                 <button
                   key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'
-                    }`}
+                  onClick={() => {
+                    setCurrentPage(page);
+                    loadData(page); // <--- เพิ่มตรงนี้
+                  }}
+                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                 >
                   {page}
                 </button>
@@ -1408,7 +1417,10 @@
                 <>
                   {endPage < totalPages - 1 && <span className="px-2">...</span>}
                   <button
-                    onClick={() => setCurrentPage(totalPages)}
+                    onClick={() => {
+                      setCurrentPage(totalPages);
+                      loadData(totalPages); // <--- เพิ่มตรงนี้
+                    }}
                     className={`px-3 py-1 rounded-lg ${currentPage === totalPages ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
                     {totalPages}
@@ -1418,7 +1430,11 @@
 
               {/* ปุ่มถัดไป */}
               <button
-                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+                onClick={() => {
+                  const p = Math.min(totalPages, currentPage + 1);
+                  setCurrentPage(p);
+                  loadData(p); // <--- เพิ่มตรงนี้
+                }}
                 disabled={currentPage === totalPages}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
@@ -3978,7 +3994,18 @@
           case 'editBill':
             return <EditBillView />;
           case 'billHistory':
-            return <BillHistoryView />;
+            return (
+              <BillHistoryView
+                bills={bills}                       // ข้อมูลบิลที่โหลดมา (15 ใบปัจจุบัน)
+                totalBillsCount={totalBillsCount}   // ยอดรวมบิลทั้งหมดใน DB (เอาไว้คำนวณจำนวนหน้า)
+                loadData={loadData}                 // ฟังก์ชันสำหรับไปดึงข้อมูลหน้าใหม่
+                currentPage={currentPage}           // หน้าปัจจุบัน
+                setCurrentPage={setCurrentPage}     // ฟังก์ชันเปลี่ยนเลขหน้าใน App
+                onEditBill={editBill}
+                onDeleteBill={deleteBill}
+                onViewBill={viewBill}
+              />
+            );
           case 'overview':
             return (
               <OverviewDashboard
