@@ -3878,6 +3878,10 @@
         }
       };
 
+      const filteredBills = React.useMemo(() => {
+        return bills;
+      }, [bills]);
+
       return (
         <div className="min-h-screen flex bg-gray-50 font-inter">
           {/* Sidebar */}
