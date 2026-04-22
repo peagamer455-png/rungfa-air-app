@@ -1208,7 +1208,7 @@
         const [dateTo, setDateTo] = useState('');
         // เพิ่ม state สำหรับ pagination
         const [currentPage, setCurrentPage] = useState(1);
-        const itemsPerPage = 15;
+        const billsPerPage = 15;
 
         // [NEW] State สำหรับยืนยันการลบประวัติ
         const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -1246,12 +1246,12 @@
         }, [bills, filterTerm, dateFrom, dateTo]);
 
         // คำนวณจำนวนหน้าทั้งหมด
-        const totalPages = Math.ceil(totalBillsCount / itemsPerPage);
+        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
 
         // ดึงรายการสำหรับหน้าปัจจุบัน
         const currentBills = useMemo(() => {
-          const startIndex = (currentPage - 1) * itemsPerPage;
-          return filteredBills.slice(startIndex, startIndex + itemsPerPage);
+          const startIndex = (currentPage - 1) * billsPerPage;
+          return filteredBills.slice(startIndex, startIndex + billsPerPage);
         }, [filteredBills, currentPage]);
 
         // component สำหรับปุ่ม pagination
