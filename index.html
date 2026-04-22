@@ -845,25 +845,33 @@
       // --- Data Fetching and Initialization ---
 
       // --- 1. ประกาศ loadData ไว้ข้างบนสุด เพื่อให้ตัวอื่นเรียกใช้ได้ ---
-      const loadData = useCallback(async () => {
+      const loadData = useCallback(async (page = 1) => {
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // ดึงข้อมูลสินค้า
-          const { data: pData } = await _supabase.from(PRODUCT_STORE).select('*').order('name', { ascending: true });
+          const start = (page - 1) * itemsPerPage;
+          const end = start + itemsPerPage - 1;
 
-          // ดึงข้อมูลบิลทั้งหมด
-          const { data: bData, error: bError } = await _supabase
-            .from(BILL_STORE)
+          // --- ดึงสินค้า (ดึงมาตุนไว้ทั้งหมด เพราะสินค้ามีไม่เยอะเท่าบิล) ---
+          const { data: pData } = await _supabase
+            .from(PRODUCT_STORE)
             .select('*')
+            .order('name', { ascending: true })
+            .limit(5000); // กันเหนียวไว้ 5,000 รายการ
+
+          // --- ดึงบิล (ดึงเฉพาะหน้าปัจจุบัน) ---
+          const { data: bData, error: bError, count } = await _supabase
+            .from(BILL_STORE)
+            .select('*', { count: 'exact' }) // สั่งให้นับจำนวนบิลทั้งหมดใน DB
             .order('date', { ascending: false })
-            .limit(10000);
+            .range(start, end); // ดึงเฉพาะช่วงใบที่ต้องการ
 
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
-          setTotalBillsCount(bData?.length || 0);
+          setCurrentPage(page);
+          if (count !== null) setTotalBillsCount(count); // เก็บยอดรวม 100,000 ใบไว้ที่นี่
 
           setIsDbReady(true);
         } catch (e) {
@@ -1196,7 +1204,7 @@
         const [dateTo, setDateTo] = useState('');
         // เพิ่ม state สำหรับ pagination
         const [currentPage, setCurrentPage] = useState(1);
-        const billsPerPage = 15;
+        const itemsPerPage = 15;
 
         // [NEW] State สำหรับยืนยันการลบประวัติ
         const [showClearConfirm, setShowClearConfirm] = useState(false);
