@@ -940,6 +940,40 @@
         }
       };
 
+      const archiveOldBills = async () => {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+        // 1. ดึงบิลที่เก่ากว่า 30 วันมาสรุปยอด
+        const { data: oldBills } = await _supabase
+          .from(BILL_STORE)
+          .select('*')
+          .lt('date', dateStr);
+
+        if (oldBills && oldBills.length > 0) {
+          const summary = oldBills.reduce((acc, bill) => ({
+            totalSales: acc.totalSales + bill.total,
+            totalProfit: acc.totalProfit + (bill.total - bill.cost), // ถ้านายมีช่องต้นทุน
+            billCount: acc.billCount + 1
+          }), { totalSales: 0, totalProfit: 0, billCount: 0 });
+
+          // 2. บันทึกเข้าตารางสรุป (จะบันทึกรวมเป็นยอดรายเดือนหรือรายวันก็ได้)
+          await _supabase.from('store_stats').insert([{
+            date: dateStr,
+            sales: summary.totalSales,
+            profit: summary.totalProfit,
+            count: summary.billCount,
+            note: 'Archived from old bills'
+          }]);
+
+          // 3. ลบบิลเก่าทิ้งจริงๆ
+          await _supabase.from(BILL_STORE).delete().lt('date', dateStr);
+
+          console.log("ล้างบิลเก่าเรียบร้อย ตัวเลขสถิติถูกบันทึกแล้วครับนาย!");
+        }
+      };
+
       // --- 2. เรียกใช้ loadData เมื่อเปิดแอป ---
       React.useEffect(() => {
         loadData();
