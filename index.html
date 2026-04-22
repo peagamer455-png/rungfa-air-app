@@ -715,7 +715,6 @@
       const [currentPage, setCurrentPage] = useState('dashboard');
       const [products, setProducts] = useState([]);
       const [bills, setBills] = useState([]);
-      const [totalBillsCount, setTotalBillsCount] = useState(0);
       const [isDbReady, setIsDbReady] = useState(false);
       const [currentBillId, setCurrentBillId] = useState(null);
       const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -849,131 +848,30 @@
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // 1. คำนวณวันที่ย้อนหลัง 30 วัน
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          const dateLimitStr = thirtyDaysAgo.toISOString().split('T')[0];
-
-          // 2. ดึงข้อมูลสินค้า (ทั้งหมด)
+          // ดึงข้อมูลสินค้า
           const { data: pData, error: pError } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true });
 
-          // 3. ดึงข้อมูลบิล (เฉพาะ 30 วันล่าสุด)
-          const { data: bData, error: bError, count: totalCount } = await _supabase
+          // ดึงข้อมูลบิล
+          const { data: bData, error: bError } = await _supabase
             .from(BILL_STORE)
-            .select('*', { count: 'exact' })
-            .gte('date', dateLimitStr) // ดึงเฉพาะวันที่ >= 30 วันก่อน
+            .select('*')
             .order('date', { ascending: false });
-
-          // 4. ดึงข้อมูลสถิติภาพรวม (สำหรับบิลที่ถูกลบไปแล้ว)
-          // สมมติชื่อตารางว่า 'store_stats' นะครับนาย
-          const { data: sData } = await _supabase
-            .from('store_stats')
-            .select('*');
 
           if (pError) throw pError;
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
-          setTotalBillsCount(totalCount || 0); // เก็บจำนวนบิลล่าสุดไว้โชว์
-
-          // ถ้ามี State สำหรับเก็บสถิติภาพรวม ให้ Set ตรงนี้
-          // setStoreHistoryStats(sData || []); 
-
           setIsDbReady(true);
-          console.log('โหลดข้อมูล 30 วันล่าสุดสำเร็จ');
-
-          // 5. สั่ง Archive บิลที่เก่ากว่า 30 วัน (ทำงานเบื้องหลัง)
-          archiveOldData(dateLimitStr);
-
+          console.log('โหลดข้อมูลจาก Supabase สำเร็จ');
         } catch (e) {
           console.error("โหลดข้อมูลไม่สำเร็จ:", e);
           setIsDbReady(true);
         }
       }, []);
-
-      // --- ฟังก์ชันสำหรับสรุปยอดและลบบิลเก่า (วางต่อท้าย loadData) ---
-      const archiveOldData = async (dateLimitStr) => {
-        try {
-          // ค้นหาบิลที่เก่ากว่ากำหนด
-          const { data: oldBills } = await _supabase
-            .from(BILL_STORE)
-            .select('*')
-            .lt('date', dateLimitStr);
-
-          if (oldBills && oldBills.length > 0) {
-            console.log(`พบข้อมูลเก่า ${oldBills.length} รายการ กำลังสรุปยอด...`);
-
-            // สรุปยอดขายและกำไรจากบิลที่จะลบ
-            const summary = oldBills.reduce((acc, bill) => {
-              const total = parseFloat(bill.total) || 0;
-              // คำนวณกำไร (ถ้ามีต้นทุน b.cost) ถ้าไม่มีจะใช้ 20% เป็นค่าเริ่มต้นเผื่อไว้
-              const profit = bill.profit || (total * 0.2);
-              return {
-                sales: acc.sales + total,
-                profit: acc.profit + profit,
-                count: acc.count + 1
-              };
-            }, { sales: 0, profit: 0, count: 0 });
-
-            // บันทึกตัวเลขเข้าตารางสถิติ
-            const { error: insError } = await _supabase
-              .from('store_stats')
-              .insert([{
-                date: new Date().toISOString(),
-                archived_count: summary.count,
-                total_sales: summary.sales,
-                total_profit: summary.profit,
-                note: 'ล้างข้อมูลอัตโนมัติ (ระบบ 30 วัน)'
-              }]);
-
-            if (!insError) {
-              // ลบบิลเก่าออกจากตารางหลักจริงๆ
-              await _supabase.from(BILL_STORE).delete().lt('date', dateLimitStr);
-              console.log('ย้ายข้อมูลเก่าไปที่หน้าสรุปภาพรวมเรียบร้อยแล้วครับนาย');
-            }
-          }
-        } catch (err) {
-          console.error("Archive Error:", err);
-        }
-      };
-
-      const archiveOldBills = async () => {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
-
-        // 1. ดึงบิลที่เก่ากว่า 30 วันมาสรุปยอด
-        const { data: oldBills } = await _supabase
-          .from(BILL_STORE)
-          .select('*')
-          .lt('date', dateStr);
-
-        if (oldBills && oldBills.length > 0) {
-          const summary = oldBills.reduce((acc, bill) => ({
-            totalSales: acc.totalSales + bill.total,
-            totalProfit: acc.totalProfit + (bill.total - bill.cost), // ถ้านายมีช่องต้นทุน
-            billCount: acc.billCount + 1
-          }), { totalSales: 0, totalProfit: 0, billCount: 0 });
-
-          // 2. บันทึกเข้าตารางสรุป (จะบันทึกรวมเป็นยอดรายเดือนหรือรายวันก็ได้)
-          await _supabase.from('store_stats').insert([{
-            date: dateStr,
-            sales: summary.totalSales,
-            profit: summary.totalProfit,
-            count: summary.billCount,
-            note: 'Archived from old bills'
-          }]);
-
-          // 3. ลบบิลเก่าทิ้งจริงๆ
-          await _supabase.from(BILL_STORE).delete().lt('date', dateStr);
-
-          console.log("ล้างบิลเก่าเรียบร้อย ตัวเลขสถิติถูกบันทึกแล้วครับนาย!");
-        }
-      };
 
       // --- 2. เรียกใช้ loadData เมื่อเปิดแอป ---
       React.useEffect(() => {
@@ -1296,29 +1194,21 @@
       };
 
       // --- 7.6. Bill History View (New Component) ---
-      const BillHistoryView = ({
-        bills,
-        totalBillsCount,
-        loadData,
-        onEditBill,
-        onDeleteBill,
-        onViewBill,
-        currentPage,
-        setCurrentPage
-      }) => {
+      const BillHistoryView = () => {
         const [filterTerm, setFilterTerm] = useState('');
         const [dateFrom, setDateFrom] = useState('');
         const [dateTo, setDateTo] = useState('');
-
+        // เพิ่ม state สำหรับ pagination
+        const [currentPage, setCurrentPage] = useState(1);
         const billsPerPage = 15;
 
-        // [NEW] State สำหรับยืนยันการลบประวัติ (คงไว้ตามเดิม)
+        // [NEW] State สำหรับยืนยันการลบประวัติ
         const [showClearConfirm, setShowClearConfirm] = useState(false);
         const [clearPassword, setClearPassword] = useState('');
         const [clearError, setClearError] = useState('');
+        // แก้ไข state สำหรับแสดง/ซ่อนรหัส
         const [clearPasswordVisible, setClearPasswordVisible] = useState(false);
 
-        // กรองข้อมูลเบื้องต้นในหน้าปัจจุบัน
         const filteredBills = useMemo(() => {
           let list = bills;
           if (filterTerm) {
@@ -1330,21 +1220,39 @@
               return false;
             });
           }
+
+          if (dateFrom || dateTo) {
+            const start = dateFrom ? new Date(dateFrom) : null;
+            const end = dateTo ? new Date(dateTo) : null;
+            if (start) start.setHours(0, 0, 0, 0);
+            if (end) end.setHours(23, 59, 59, 999);
+            list = list.filter(bill => {
+              const t = new Date(bill.date).getTime();
+              if (start && t < start.getTime()) return false;
+              if (end && t > end.getTime()) return false;
+              return true;
+            });
+          }
+
           return list;
-        }, [bills, filterTerm]);
+        }, [bills, filterTerm, dateFrom, dateTo]);
 
-        // คำนวณจำนวนหน้าทั้งหมดจากยอดในฐานข้อมูลจริงๆ
-        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
+        // คำนวณจำนวนหน้าทั้งหมด
+        const totalPages = Math.ceil(filteredBills.length / billsPerPage);
 
-        // ข้อมูลที่จะนำไปแสดง (ไม่ต้อง slice แล้วเพราะ Supabase หั่นมาให้แล้ว)
-        const currentBills = filteredBills;
+        // ดึงรายการสำหรับหน้าปัจจุบัน
+        const currentBills = useMemo(() => {
+          const startIndex = (currentPage - 1) * billsPerPage;
+          return filteredBills.slice(startIndex, startIndex + billsPerPage);
+        }, [filteredBills, currentPage]);
 
         // component สำหรับปุ่ม pagination
         const Pagination = () => {
-          const maxPageButtons = 5;
+          const maxPageButtons = 5; // จำนวนปุ่มตัวเลขที่จะแสดง
           let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
           let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
 
+          // ปรับ startPage ถ้า endPage ชนขอบ
           if (endPage - startPage + 1 < maxPageButtons) {
             startPage = Math.max(1, endPage - maxPageButtons + 1);
           }
@@ -1353,11 +1261,7 @@
             <div className="flex justify-center items-center space-x-2 mt-6">
               {/* ปุ่มก่อนหน้า */}
               <button
-                onClick={() => {
-                  const p = Math.max(1, currentPage - 1);
-                  setCurrentPage(p);
-                  loadData(p);
-                }}
+                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
                 disabled={currentPage === 1}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
@@ -1368,10 +1272,7 @@
               {startPage > 1 && (
                 <>
                   <button
-                    onClick={() => {
-                      setCurrentPage(1);
-                      loadData(1);
-                    }}
+                    onClick={() => setCurrentPage(1)}
                     className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
                     1
@@ -1384,11 +1285,9 @@
               {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
                 <button
                   key={page}
-                  onClick={() => {
-                    setCurrentPage(page);
-                    loadData(page);
-                  }}
-                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
                 >
                   {page}
                 </button>
@@ -1399,10 +1298,7 @@
                 <>
                   {endPage < totalPages - 1 && <span className="px-2">...</span>}
                   <button
-                    onClick={() => {
-                      setCurrentPage(totalPages);
-                      loadData(totalPages);
-                    }}
+                    onClick={() => setCurrentPage(totalPages)}
                     className={`px-3 py-1 rounded-lg ${currentPage === totalPages ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
                     {totalPages}
@@ -1412,11 +1308,7 @@
 
               {/* ปุ่มถัดไป */}
               <button
-                onClick={() => {
-                  const p = Math.min(totalPages, currentPage + 1);
-                  setCurrentPage(p);
-                  loadData(p);
-                }}
+                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
                 disabled={currentPage === totalPages}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
@@ -3916,15 +3808,21 @@
             if (importedData.bills) {
               for (const item of importedData.bills) {
                 const { error } = await _supabase.from('bills').upsert({
-                  id: item.id, // ใช้ ID เดิมจาก Firebase ได้เลย
+                  id: parseInt(item.id), // บังคับเป็นตัวเลขเพื่อให้ ID บิลขึ้นถูกต้อง
                   date: item.date,
-                  customerName: item.customer || "ลูกค้าทั่วไป", // เปลี่ยนจาก customer เป็น customerName
-                  items: item.items || [],
-                  total: parseFloat(item.totalSale) || 0, // เปลี่ยนจาก totalSale เป็น total
-                  discount: parseFloat(item.discount) || 0,
-                  netTotal: parseFloat(item.totalSale) || 0, // หรือคำนวณใหม่ถ้ามีส่วนลด
-                  status: item.status || "completed"
+                  customerName: item.customer || "ลูกค้าทั่วไป", 
+                  customerDetails: item.customerDetails || "", // รายละเอียดลูกค้า
+                  items: item.items || [], 
+                  totalSale: parseFloat(item.totalSale) || 0,   // ยอดขาย (840)
+                  totalCost: parseFloat(item.totalCost) || 0,   // ทุน (694)
+                  totalProfit: parseFloat(item.totalProfit) || 0, // กำไร (146)
+                  discount: parseFloat(item.discount) || 0,      // ส่วนลด (ถ้ามี)
+                  status: item.status || "completed",
+                  // ใส่ค่าพวกนี้ไว้กันเหนียวถ้าโค้ดส่วนอื่นเรียกใช้ชื่อ total หรือ netTotal
+                  total: parseFloat(item.totalSale) || 0,
+                  netTotal: parseFloat(item.totalSale - (item.discount || 0)) || 0
                 });
+                
                 if (error) console.error("Bill Error:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
@@ -3976,18 +3874,7 @@
           case 'editBill':
             return <EditBillView />;
           case 'billHistory':
-            return (
-              <BillHistoryView
-                bills={bills}                       // ข้อมูลบิลที่โหลดมา (15 ใบปัจจุบัน)
-                totalBillsCount={totalBillsCount}   // ยอดรวมบิลทั้งหมดใน DB (เอาไว้คำนวณจำนวนหน้า)
-                loadData={loadData}                 // ฟังก์ชันสำหรับไปดึงข้อมูลหน้าใหม่
-                currentPage={currentPage}           // หน้าปัจจุบัน
-                setCurrentPage={setCurrentPage}     // ฟังก์ชันเปลี่ยนเลขหน้าใน App
-                onEditBill={editBill}
-                onDeleteBill={deleteBill}
-                onViewBill={viewBill}
-              />
-            );
+            return <BillHistoryView />;
           case 'overview':
             return (
               <OverviewDashboard
