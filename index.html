@@ -1246,12 +1246,12 @@
         }, [bills, filterTerm, dateFrom, dateTo]);
 
         // คำนวณจำนวนหน้าทั้งหมด
-        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
+        const totalPages = Math.ceil(totalBillsCount / itemsPerPage);
 
         // ดึงรายการสำหรับหน้าปัจจุบัน
         const currentBills = useMemo(() => {
-          const startIndex = (currentPage - 1) * billsPerPage;
-          return filteredBills.slice(startIndex, startIndex + billsPerPage);
+          const startIndex = (currentPage - 1) * itemsPerPage;
+          return filteredBills.slice(startIndex, startIndex + itemsPerPage);
         }, [filteredBills, currentPage]);
 
         // component สำหรับปุ่ม pagination
