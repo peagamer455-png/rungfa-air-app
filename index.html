@@ -1295,7 +1295,16 @@
       };
 
       // --- 7.6. Bill History View (New Component) ---
-      const BillHistoryView = () => {
+      const BillHistoryView = ({
+        bills,
+        totalBillsCount,
+        loadData,
+        onEditBill,
+        onDeleteBill,
+        onViewBill,
+        currentPage,
+        setCurrentPage
+      }) => {
         const [filterTerm, setFilterTerm] = useState('');
         const [dateFrom, setDateFrom] = useState('');
         const [dateTo, setDateTo] = useState('');
