@@ -845,34 +845,24 @@
       // --- Data Fetching and Initialization ---
 
       // --- 1. ประกาศ loadData ไว้ข้างบนสุด เพื่อให้ตัวอื่นเรียกใช้ได้ ---
-      const loadData = useCallback(async (page = 1) => {
+      const loadData = useCallback(async () => {
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
-
-          const itemsPerPage = 14;
-          const start = (page - 1) * itemsPerPage;
-          const end = start + itemsPerPage - 1;
 
           // ดึงข้อมูลสินค้า
           const { data: pData } = await _supabase.from(PRODUCT_STORE).select('*').order('name', { ascending: true });
 
-          // ดึงข้อมูลบิล และจำนวนบิลทั้งหมด ({ count: 'exact' })
-          const { data: bData, error: bError, count } = await _supabase
+          // ดึงข้อมูลบิลทั้งหมด
+          const { data: bData, error: bError } = await _supabase
             .from(BILL_STORE)
-            .select('*', { count: 'exact' })
-            .order('date', { ascending: false })
-            .range(start, end);
+            .select('*')
+            .order('date', { ascending: false });
 
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
-          setCurrentPage(page);
-
-          // จุดที่แก้: อัปเดตจำนวนบิลทั้งหมด เพื่อให้ปุ่มเลขหน้าแสดงครบ
-          if (count !== null) {
-            setTotalBillsCount(count);
-          }
+          setTotalBillsCount(bData?.length || 0);
 
           setIsDbReady(true);
         } catch (e) {
@@ -883,7 +873,7 @@
 
       // --- 2. เรียกใช้ loadData เมื่อเปิดแอป ---
       React.useEffect(() => {
-        loadData(1);
+        loadData();
       }, [loadData]);
 
       // --- 3. ระบบ Realtime ฟังข้อมูลจาก Supabase ---
@@ -1277,7 +1267,7 @@
               {startPage > 1 && (
                 <>
                   <button
-                    onClick={() => loadData(1)}
+                    onClick={() => setCurrentPage(1)}
                     className={`px-3 py-1 rounded-lg ${currentPage === 1 ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                   >
                     1
