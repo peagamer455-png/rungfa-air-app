@@ -1202,93 +1202,94 @@
       };
 
       // --- 7.6. Bill History View (New Component) ---
-      const BillHistoryView = ({
-        bills,
-        totalBillsCount,
-        loadData,
-        onEditBill,
-        onDeleteBill,
-        onViewBill,
-        currentPage, // รับมาจาก App หลัก
-        setCurrentPage // รับมาจาก App หลัก
-      }) => {
-        const [filterTerm, setFilterTerm] = useState('');
-        const [dateFrom, setDateFrom] = useState('');
-        const [dateTo, setDateTo] = useState('');
+      const BillHistoryView = ({ 
+  bills, 
+  totalBillsCount, 
+  loadData, 
+  onEditBill, 
+  onDeleteBill, 
+  onViewBill,
+  currentPage, // รับมาจาก App หลัก
+  setCurrentPage // รับมาจาก App หลัก
+}) => {
+  const [filterTerm, setFilterTerm] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  
+  const billsPerPage = 14; // ให้ตรงกับที่ตั้งไว้ใน loadData
 
-        const billsPerPage = 14; // ให้ตรงกับที่ตั้งไว้ใน loadData
+  // [NEW] State สำหรับยืนยันการลบประวัติ
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearPassword, setClearPassword] = useState('');
+  const [clearError, setClearError] = useState('');
+  const [clearPasswordVisible, setClearPasswordVisible] = useState(false);
 
-        // [NEW] State สำหรับยืนยันการลบประวัติ
-        const [showClearConfirm, setShowClearConfirm] = useState(false);
-        const [clearPassword, setClearPassword] = useState('');
-        const [clearError, setClearError] = useState('');
-        const [clearPasswordVisible, setClearPasswordVisible] = useState(false);
+  // กรองข้อมูลเฉพาะที่มีอยู่ใน State (Client-side search สำหรับข้อมูลที่โหลดมาแล้ว)
+  // หมายเหตุ: ถ้าจะ Search ทั้งแสนใบ ควรส่ง filterTerm ไปใน loadData ด้วยครับนาย
+  const filteredBills = useMemo(() => {
+    let list = bills;
+    if (filterTerm) {
+      const lowerFilter = filterTerm.toString().toLowerCase();
+      list = list.filter(bill => {
+        if (bill.id && bill.id.toString().includes(lowerFilter)) return true;
+        if (bill.customer && bill.customer.toLowerCase().includes(lowerFilter)) return true;
+        if (bill.items && bill.items.some(item => item.name.toLowerCase().includes(lowerFilter))) return true;
+        return false;
+      });
+    }
+    // ... (ส่วนกรองวันที่คงเดิม)
+    return list;
+  }, [bills, filterTerm, dateFrom, dateTo]);
 
-        // กรองข้อมูลเฉพาะที่มีอยู่ใน State (Client-side search สำหรับข้อมูลที่โหลดมาแล้ว)
-        // หมายเหตุ: ถ้าจะ Search ทั้งแสนใบ ควรส่ง filterTerm ไปใน loadData ด้วยครับนาย
-        const filteredBills = useMemo(() => {
-          let list = bills;
-          if (filterTerm) {
-            const lowerFilter = filterTerm.toString().toLowerCase();
-            list = list.filter(bill => {
-              if (bill.id && bill.id.toString().includes(lowerFilter)) return true;
-              if (bill.customer && bill.customer.toLowerCase().includes(lowerFilter)) return true;
-              if (bill.items && bill.items.some(item => item.name.toLowerCase().includes(lowerFilter))) return true;
-              return false;
-            });
-          }
-          // ... (ส่วนกรองวันที่คงเดิม)
-          return list;
-        }, [bills, filterTerm, dateFrom, dateTo]);
+  // คำนวณจำนวนหน้าจากยอดรวมใน DB (totalBillsCount)
+  const totalPages = Math.ceil(totalBillsCount / billsPerPage);
 
-        // คำนวณจำนวนหน้าจากยอดรวมใน DB (totalBillsCount)
-        const totalPages = Math.ceil(totalBillsCount / billsPerPage);
+  // Pagination Component
+  const Pagination = () => {
+    const maxPageButtons = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
+    let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
 
-        // Pagination Component
-        const Pagination = () => {
-          const maxPageButtons = 5;
-          let startPage = Math.max(1, currentPage - Math.floor(maxPageButtons / 2));
-          let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
+    if (endPage - startPage + 1 < maxPageButtons) {
+      startPage = Math.max(1, endPage - maxPageButtons + 1);
+    }
 
-          if (endPage - startPage + 1 < maxPageButtons) {
-            startPage = Math.max(1, endPage - maxPageButtons + 1);
-          }
+    return (
+      <div className="flex justify-center items-center space-x-2 mt-6 pb-10">
+        <button
+          onClick={() => loadData(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-100 disabled:opacity-50"
+        >
+          ←
+        </button>
 
-          return (
-            <div className="flex justify-center items-center space-x-2 mt-6 pb-10">
-              <button
-                onClick={() => loadData(currentPage - 1)}
-                disabled={currentPage === 1}
-                className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-100 disabled:opacity-50"
-              >
-                ←
-              </button>
+        {startPage > 1 && (
+          <button onClick={() => loadData(1)} className="px-3 py-1 rounded-lg bg-white border">1</button>
+        )}
 
-              {startPage > 1 && (
-                <button onClick={() => loadData(1)} className="px-3 py-1 rounded-lg bg-white border">1</button>
-              )}
+        {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
+          <button
+            key={page}
+            onClick={() => loadData(page)} // เรียก loadData จริงๆ เพื่อไปดึงจาก Server
+            className={`px-3 py-1 rounded-lg font-bold ${
+              currentPage === page ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600'
+            }`}
+          >
+            {page}
+          </button>
+        ))}
 
-              {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
-                <button
-                  key={page}
-                  onClick={() => loadData(page)} // เรียก loadData จริงๆ เพื่อไปดึงจาก Server
-                  className={`px-3 py-1 rounded-lg font-bold ${currentPage === page ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600'
-                    }`}
-                >
-                  {page}
-                </button>
-              ))}
-
-              <button
-                onClick={() => loadData(currentPage + 1)}
-                disabled={currentPage >= totalPages}
-                className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-100 disabled:opacity-50"
-              >
-                →
-              </button>
-            </div>
-          );
-        };
+        <button
+          onClick={() => loadData(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+          className="px-3 py-1 rounded-lg bg-white border hover:bg-gray-100 disabled:opacity-50"
+        >
+          →
+        </button>
+      </div>
+    );
+  };
 
         // ฟังก์ชันสำหรับเคลียร์ประวัติบิล
         const handleClearHistory = async () => {
@@ -3877,10 +3878,6 @@
             );
         }
       };
-
-      const filteredBills = React.useMemo(() => {
-        return bills;
-      }, [bills]);
 
       return (
         <div className="min-h-screen flex bg-gray-50 font-inter">
