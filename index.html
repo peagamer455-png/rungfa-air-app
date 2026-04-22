@@ -3882,7 +3882,17 @@
           case 'editBill':
             return <EditBillView />;
           case 'billHistory':
-            return <BillHistoryView />;
+            return (
+              <BillHistoryView
+                bills={filteredBills}           // ข้อมูลบิล 14 ใบที่จะโชว์
+                totalBillsCount={totalBillsCount} // ยอดรวมบิลทั้งหมด (เช่น 3,000)
+                currentPage={currentPage}      // หน้าปัจจุบัน
+                loadData={loadData}             // ฟังก์ชันไปดึงข้อมูลจาก Supabase
+                onEditBill={handleEditBill}
+                onDeleteBill={handleDeleteBill}
+                onViewBill={handleViewBill}
+              />
+            );
           case 'overview':
             return (
               <OverviewDashboard
