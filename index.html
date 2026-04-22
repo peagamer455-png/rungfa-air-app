@@ -848,30 +848,36 @@
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // 1. กำหนดหน้าละ 14 รายการตามที่นายต้องการ
+          // 1. ตั้งค่าจำนวนต่อหน้า และคำนวณจุดเริ่ม/จบ
           const itemsPerPage = 14;
           const start = (page - 1) * itemsPerPage;
           const end = start + itemsPerPage - 1;
 
-          // โหลดสินค้าตามปกติ
+          // 2. ดึงข้อมูลสินค้า (ดึงมาทั้งหมดตามปกติ)
           const { data: pData, error: pError } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true });
 
-          // 2. โหลดบิลแบบระบุช่วง (Range) เพื่อให้เกิน 1,000 ใบได้
-          const { data: bData, error: bError } = await _supabase
+          // 3. ดึงข้อมูลบิล **เน้นตรง .range(start, end)**
+          const { data: bData, error: bError, count } = await _supabase
             .from(BILL_STORE)
-            .select('*')
+            .select('*', { count: 'exact' }) // สั่งให้นับจำนวนบิลทั้งหมดใน DB ด้วย
             .order('date', { ascending: false })
-            .range(start, end); // ใช้ start กับ end ที่คำนวณไว้ข้างบน
+            .range(start, end);
 
           if (pError) throw pError;
           if (bError) throw bError;
 
           setProducts(pData || []);
-          setBills(bData || []);
-          setCurrentPage(page); // อัปเดตเลขหน้าปัจจุบัน
+          setBills(bData || []); // ข้อมูล 14 ใบใหม่จะเข้าไปแทนที่อันเดิม
+          setCurrentPage(page);   // อัปเดตเลขหน้าปัจจุบัน
+
+          // ถ้ามี State สำหรับเก็บจำนวนหน้าทั้งหมด ให้คำนวณใหม่ตรงนี้
+          if (count) {
+            setTotalBillsCount(count); // สมมติว่านายมี State ชื่อนี้
+          }
+
           setIsDbReady(true);
         } catch (e) {
           console.error("โหลดข้อมูลไม่สำเร็จ:", e);
