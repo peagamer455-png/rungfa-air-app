@@ -443,7 +443,7 @@
     );
 
     // --- Promotion View (เวอร์ชันใช้ Popup ของระบบ) ---
-    const PromotionView = ({ products, setPopupContent, setShowPopup }) => {
+    const PromotionView = ({ products, loadData, setPopupContent, setShowPopup }) => {
       const [promotions, setPromotions] = React.useState([]);
       const [formData, setFormData] = React.useState({
         name: '',
@@ -908,17 +908,21 @@
       }, [isDbReady, loadData]);
 
 
-      useEffect(() => {
+      React.useEffect(() => {
+        // 1. โหลด Lib สำหรับ PDF
         loadPdfLibs();
 
-        const unsubProducts = loadData(PRODUCT_STORE, (data) => setProducts(data));
-        const unsubBills = loadData(BILL_STORE, (data) => setBills(data));
+        // 2. เรียกโหลดข้อมูลครั้งแรก (หน้า 1)
+        // ระบบใหม่จะโหลดทั้งสินค้าและบิล (14 ใบแรก) มาพร้อมกันในฟังก์ชันเดียวเลย
+        loadData(1);
 
+        // 3. ส่วนการ Cleanup (ถ้าไม่ได้ทำ Realtime ในนี้ ก็ไม่ต้องมี unsub ครับ)
         return () => {
-          unsubProducts();
-          unsubBills();
+          // ลบการเรียก unsubProducts(); และ unsubBills(); ออก
+          // เพราะ loadData ตัวใหม่ไม่ใช่ listener แล้ว
+          console.log("Cleanup: ปิดหน้าจอ");
         };
-      }, []);
+      }, [loadData]); // ใส่ loadData ไว้ใน dependency
 
       // ปิด autocomplete / คำแนะนำของเบราว์เซอร์ สำหรับ form / input / textarea
       useEffect(() => {
