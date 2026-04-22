@@ -1262,7 +1262,7 @@
             <div className="flex justify-center items-center space-x-2 mt-6">
               {/* ปุ่มก่อนหน้า */}
               <button
-                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+                onClick={() => loadData(Math.max(1, currentPage - 1))}
                 disabled={currentPage === 1}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
@@ -1286,9 +1286,8 @@
               {Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i).map(page => (
                 <button
                   key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'
-                    }`}
+                  onClick={() => loadData(page)} // เปลี่ยนจาก setCurrentPage(page) เป็น loadData(page)
+                  className={`px-3 py-1 rounded-lg ${currentPage === page ? 'bg-green-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
                 >
                   {page}
                 </button>
@@ -1309,7 +1308,7 @@
 
               {/* ปุ่มถัดไป */}
               <button
-                onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+                onClick={() => loadData(Math.min(totalPages, currentPage + 1))}
                 disabled={currentPage === totalPages}
                 className="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 disabled:text-gray-400"
               >
@@ -3811,9 +3810,9 @@
                 const { error } = await _supabase.from('bills').upsert({
                   id: parseInt(item.id), // บังคับเป็นตัวเลขเพื่อให้ ID บิลขึ้นถูกต้อง
                   date: item.date,
-                  customerName: item.customer || "ลูกค้าทั่วไป", 
+                  customerName: item.customer || "ลูกค้าทั่วไป",
                   customerDetails: item.customerDetails || "", // รายละเอียดลูกค้า
-                  items: item.items || [], 
+                  items: item.items || [],
                   totalSale: parseFloat(item.totalSale) || 0,   // ยอดขาย (840)
                   totalCost: parseFloat(item.totalCost) || 0,   // ทุน (694)
                   totalProfit: parseFloat(item.totalProfit) || 0, // กำไร (146)
@@ -3823,7 +3822,7 @@
                   total: parseFloat(item.totalSale) || 0,
                   netTotal: parseFloat(item.totalSale - (item.discount || 0)) || 0
                 });
-                
+
                 if (error) console.error("Bill Error:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
