@@ -848,30 +848,97 @@
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // ดึงข้อมูลสินค้า
+          // 1. คำนวณวันที่ย้อนหลัง 30 วัน
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          const dateLimitStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+          // 2. ดึงข้อมูลสินค้า (ทั้งหมด)
           const { data: pData, error: pError } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true });
 
-          // ดึงข้อมูลบิล
-          const { data: bData, error: bError } = await _supabase
+          // 3. ดึงข้อมูลบิล (เฉพาะ 30 วันล่าสุด)
+          const { data: bData, error: bError, count: totalCount } = await _supabase
             .from(BILL_STORE)
-            .select('*')
+            .select('*', { count: 'exact' })
+            .gte('date', dateLimitStr) // ดึงเฉพาะวันที่ >= 30 วันก่อน
             .order('date', { ascending: false });
+
+          // 4. ดึงข้อมูลสถิติภาพรวม (สำหรับบิลที่ถูกลบไปแล้ว)
+          // สมมติชื่อตารางว่า 'store_stats' นะครับนาย
+          const { data: sData } = await _supabase
+            .from('store_stats')
+            .select('*');
 
           if (pError) throw pError;
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
+          setTotalBillsCount(totalCount || 0); // เก็บจำนวนบิลล่าสุดไว้โชว์
+
+          // ถ้ามี State สำหรับเก็บสถิติภาพรวม ให้ Set ตรงนี้
+          // setStoreHistoryStats(sData || []); 
+
           setIsDbReady(true);
-          console.log('โหลดข้อมูลจาก Supabase สำเร็จ');
+          console.log('โหลดข้อมูล 30 วันล่าสุดสำเร็จ');
+
+          // 5. สั่ง Archive บิลที่เก่ากว่า 30 วัน (ทำงานเบื้องหลัง)
+          archiveOldData(dateLimitStr);
+
         } catch (e) {
           console.error("โหลดข้อมูลไม่สำเร็จ:", e);
           setIsDbReady(true);
         }
       }, []);
+
+      // --- ฟังก์ชันสำหรับสรุปยอดและลบบิลเก่า (วางต่อท้าย loadData) ---
+      const archiveOldData = async (dateLimitStr) => {
+        try {
+          // ค้นหาบิลที่เก่ากว่ากำหนด
+          const { data: oldBills } = await _supabase
+            .from(BILL_STORE)
+            .select('*')
+            .lt('date', dateLimitStr);
+
+          if (oldBills && oldBills.length > 0) {
+            console.log(`พบข้อมูลเก่า ${oldBills.length} รายการ กำลังสรุปยอด...`);
+
+            // สรุปยอดขายและกำไรจากบิลที่จะลบ
+            const summary = oldBills.reduce((acc, bill) => {
+              const total = parseFloat(bill.total) || 0;
+              // คำนวณกำไร (ถ้ามีต้นทุน b.cost) ถ้าไม่มีจะใช้ 20% เป็นค่าเริ่มต้นเผื่อไว้
+              const profit = bill.profit || (total * 0.2);
+              return {
+                sales: acc.sales + total,
+                profit: acc.profit + profit,
+                count: acc.count + 1
+              };
+            }, { sales: 0, profit: 0, count: 0 });
+
+            // บันทึกตัวเลขเข้าตารางสถิติ
+            const { error: insError } = await _supabase
+              .from('store_stats')
+              .insert([{
+                date: new Date().toISOString(),
+                archived_count: summary.count,
+                total_sales: summary.sales,
+                total_profit: summary.profit,
+                note: 'ล้างข้อมูลอัตโนมัติ (ระบบ 30 วัน)'
+              }]);
+
+            if (!insError) {
+              // ลบบิลเก่าออกจากตารางหลักจริงๆ
+              await _supabase.from(BILL_STORE).delete().lt('date', dateLimitStr);
+              console.log('ย้ายข้อมูลเก่าไปที่หน้าสรุปภาพรวมเรียบร้อยแล้วครับนาย');
+            }
+          }
+        } catch (err) {
+          console.error("Archive Error:", err);
+        }
+      };
 
       // --- 2. เรียกใช้ loadData เมื่อเปิดแอป ---
       React.useEffect(() => {
