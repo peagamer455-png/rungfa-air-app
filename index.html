@@ -849,34 +849,29 @@
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // 1. ตั้งค่าจำนวนต่อหน้า และคำนวณจุดเริ่ม/จบ
           const itemsPerPage = 14;
           const start = (page - 1) * itemsPerPage;
           const end = start + itemsPerPage - 1;
 
-          // 2. ดึงข้อมูลสินค้า (ดึงมาทั้งหมดตามปกติ)
-          const { data: pData, error: pError } = await _supabase
-            .from(PRODUCT_STORE)
-            .select('*')
-            .order('name', { ascending: true });
+          // ดึงข้อมูลสินค้า
+          const { data: pData } = await _supabase.from(PRODUCT_STORE).select('*').order('name', { ascending: true });
 
-          // 3. ดึงข้อมูลบิล **เน้นตรง .range(start, end)**
+          // ดึงข้อมูลบิล และจำนวนบิลทั้งหมด ({ count: 'exact' })
           const { data: bData, error: bError, count } = await _supabase
             .from(BILL_STORE)
-            .select('*', { count: 'exact' }) // สั่งให้นับจำนวนบิลทั้งหมดใน DB ด้วย
+            .select('*', { count: 'exact' })
             .order('date', { ascending: false })
             .range(start, end);
 
-          if (pError) throw pError;
           if (bError) throw bError;
 
           setProducts(pData || []);
-          setBills(bData || []); // ข้อมูล 14 ใบใหม่จะเข้าไปแทนที่อันเดิม
-          setCurrentPage(page);   // อัปเดตเลขหน้าปัจจุบัน
+          setBills(bData || []);
+          setCurrentPage(page);
 
-          // ถ้ามี State สำหรับเก็บจำนวนหน้าทั้งหมด ให้คำนวณใหม่ตรงนี้
-          if (count) {
-            setTotalBillsCount(count); // สมมติว่านายมี State ชื่อนี้
+          // จุดที่แก้: อัปเดตจำนวนบิลทั้งหมด เพื่อให้ปุ่มเลขหน้าแสดงครบ
+          if (count !== null) {
+            setTotalBillsCount(count);
           }
 
           setIsDbReady(true);
@@ -1251,7 +1246,7 @@
         }, [bills, filterTerm, dateFrom, dateTo]);
 
         // คำนวณจำนวนหน้าทั้งหมด
-        const totalPages = Math.ceil(filteredBills.length / billsPerPage);
+        const totalPages = Math.ceil(totalBillsCount / itemsPerPage);
 
         // ดึงรายการสำหรับหน้าปัจจุบัน
         const currentBills = useMemo(() => {
