@@ -844,30 +844,38 @@
       // --- Data Fetching and Initialization ---
 
       // --- 1. ประกาศ loadData ไว้ข้างบนสุด เพื่อให้ตัวอื่นเรียกใช้ได้ ---
-      const loadData = useCallback(async () => {
+      const loadData = useCallback(async (page = 1) => {
         try {
           if (typeof loadPdfLibs === 'function') await loadPdfLibs();
 
-          // ดึงข้อมูลสินค้า
+          // 2. คำนวณจุดเริ่มต้น (start) และจุดสิ้นสุด (end) 
+          // นายอยากให้หน้าละ 14 ใบเหมือนเดิม หรือจะเอาหน้าละ 100 ใบก็ได้ครับ
+          const itemsPerPage = 14;
+          const start = (page - 1) * itemsPerPage;
+          const end = start + itemsPerPage - 1;
+
+          // ดึงข้อมูลสินค้า (ดึงมาทั้งหมดตามเดิม)
           const { data: pData, error: pError } = await _supabase
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true });
 
-          // ดึงข้อมูลบิล
+          // ดึงข้อมูลบิล (ดึงเฉพาะช่วงที่เราต้องการ)
           const { data: bData, error: bError } = await _supabase
             .from(BILL_STORE)
             .select('*')
             .order('date', { ascending: false })
-            .range(start, end);
+            .range(start, end); // <--- ทีนี้มันจะรู้จัก start กับ end แล้วครับ
 
           if (pError) throw pError;
           if (bError) throw bError;
 
           setProducts(pData || []);
           setBills(bData || []);
+          setCurrentPage(page); // อย่าลืมอัปเดต state ของหน้าปัจจุบันด้วยนาย
           setIsDbReady(true);
-          console.log('โหลดข้อมูลจาก Supabase สำเร็จ');
+
+          console.log(`โหลดข้อมูลหน้าที่ ${page} (${start} ถึง ${end}) สำเร็จ`);
         } catch (e) {
           console.error("โหลดข้อมูลไม่สำเร็จ:", e);
           setIsDbReady(true);
