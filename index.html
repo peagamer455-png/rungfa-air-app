@@ -443,7 +443,7 @@
     );
 
     // --- Promotion View (เวอร์ชันใช้ Popup ของระบบ) ---
-    const PromotionView = ({ products, setPopupContent, setShowPopup }) => {
+    const PromotionView = ({ products, setPopupContent, setShowPopup, loadData }) => {
       const [promotions, setPromotions] = React.useState([]);
       const [formData, setFormData] = React.useState({
         name: '',
@@ -454,38 +454,23 @@
       });
       const [searchTerm, setSearchTerm] = React.useState('');
 
-      // 1. แก้ไข fetchPromotions ให้รองรับทั้ง Supabase และกัน Error
-      const fetchPromotions = useCallback(async () => {
+      // ฟังก์ชันดึงข้อมูลโปรโมชั่น (ดึงตรงจาก Supabase ภายในตัวเลย)
+      const fetchPromotions = React.useCallback(async () => {
         try {
-          // ถ้าใน Supabase นายยังไม่ได้สร้างตารางชื่อ promotions ให้คอมเมนต์บรรทัดข้างล่างนี้ไว้ครับ
           const { data, error } = await _supabase.from('promotions').select('*');
-          if (error) {
-            console.warn("ยังไม่มีตาราง promotions ใน Supabase หรือยังไม่ได้ตั้งค่า");
-            return;
-          }
+          if (error) throw error;
           setPromotions(data || []);
         } catch (e) {
-          console.error("fetchPromotions Error:", e);
+          console.error("fetchPromotions Error:", e.message);
         }
       }, []);
 
-      // 2. ปรับปรุง useEffect หลัก ให้เรียก loadData อย่างปลอดภัย
+      // เมื่อคอมโพเนนต์โหลด ให้โหลดทั้งสินค้า (loadData) และโปรโมชั่น
       React.useEffect(() => {
-        const initApp = async () => {
-          if (typeof loadData === 'function') {
-            await loadData();
-          }
-          // ถ้ายังไม่มีตารางโปรโมชั่น ให้เอาเครื่องหมาย // ข้างหน้าออกเมื่อสร้างเสร็จ
-          // await fetchPromotions(); 
-        };
-        initApp();
-      }, [loadData]); // ลบ fetchPromotions ออกจาก dependency ตรงนี้ก่อนเพื่อกัน Loop
-
-      React.useEffect(() => {
+        if (typeof loadData === 'function') loadData();
         fetchPromotions();
-      }, []);
+      }, [loadData, fetchPromotions]);
 
-      // ฟังก์ชันเรียกใช้งาน Popup แจ้งเตือน
       const showAppPopup = (title, message) => {
         setPopupContent({ title, message });
         setShowPopup(true);
@@ -496,10 +481,20 @@
           showAppPopup('⚠️ ข้อมูลไม่ครบ', 'กรุณากรอกข้อมูลให้ครบถ้วน');
           return;
         }
-        await putData('promotions', { ...formData, discountPrice: Number(formData.discountPrice) });
-        setFormData({ name: '', type: 'qty', items: [], minQty: 1, discountPrice: '' });
-        fetchPromotions();
-        showAppPopup('✅ สำเร็จ', 'บันทึกโปรโมชั่นใหม่เรียบร้อยแล้ว');
+
+        try {
+          // เรียกใช้ฟังก์ชันจัดการข้อมูลกลาง
+          await putData('promotions', {
+            ...formData,
+            discountPrice: Number(formData.discountPrice)
+          });
+
+          setFormData({ name: '', type: 'qty', items: [], minQty: 1, discountPrice: '' });
+          fetchPromotions(); // รีโหลดรายการ
+          showAppPopup('✅ สำเร็จ', 'บันทึกโปรโมชั่นเรียบร้อยแล้ว');
+        } catch (err) {
+          showAppPopup('❌ ผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้');
+        }
       };
 
       const deletePromo = async (id) => {
@@ -507,22 +502,17 @@
           title: '❓ ยืนยันการลบ',
           message: 'คุณต้องการลบโปรโมชั่นนี้ใช่หรือไม่?',
           actions: [
-            {
-              label: 'ยกเลิก',
-              handler: () => setShowPopup(false),
-              variant: 'secondary'
-            },
+            { label: 'ยกเลิก', handler: () => setShowPopup(false), variant: 'secondary' },
             {
               label: 'ยืนยันการลบ',
               handler: async () => {
                 try {
-                  // เปลี่ยนมาใช้ deleteData ของ Firebase ที่มีอยู่ในไฟล์แล้ว
-                  await deleteData(PROMO_STORE, id);
+                  // มั่นใจว่าใช้ชื่อ Table 'promotions' ตรงๆ เพื่อกัน Error จากตัวแปรที่ไม่ได้ประกาศ
+                  await deleteData('promotions', id);
                   setShowPopup(false);
                   fetchPromotions();
                 } catch (err) {
                   console.error(err);
-                  setShowPopup(false);
                 }
               },
               variant: 'danger'
@@ -532,7 +522,7 @@
         setShowPopup(true);
       };
 
-      const filteredProducts = products.filter(p =>
+      const filteredProducts = (products || []).filter(p =>
         p.name.toLowerCase().includes(searchTerm.toLowerCase())
       ).slice(0, 5);
 
@@ -3810,9 +3800,9 @@
                 const { error } = await _supabase.from('bills').upsert({
                   id: parseInt(item.id), // บังคับเป็นตัวเลขเพื่อให้ ID บิลขึ้นถูกต้อง
                   date: item.date,
-                  customerName: item.customer || "ลูกค้าทั่วไป", 
+                  customerName: item.customer || "ลูกค้าทั่วไป",
                   customerDetails: item.customerDetails || "", // รายละเอียดลูกค้า
-                  items: item.items || [], 
+                  items: item.items || [],
                   totalSale: parseFloat(item.totalSale) || 0,   // ยอดขาย (840)
                   totalCost: parseFloat(item.totalCost) || 0,   // ทุน (694)
                   totalProfit: parseFloat(item.totalProfit) || 0, // กำไร (146)
@@ -3822,7 +3812,7 @@
                   total: parseFloat(item.totalSale) || 0,
                   netTotal: parseFloat(item.totalSale - (item.discount || 0)) || 0
                 });
-                
+
                 if (error) console.error("Bill Error:", error.message);
                 processed++;
                 setImportProgress(Math.round((processed / totalItems) * 100));
