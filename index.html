@@ -853,7 +853,6 @@
             .from(PRODUCT_STORE)
             .select('*')
             .order('name', { ascending: true })
-            .range(0, 2999)
 
           // ดึงข้อมูลบิล
           const { data: bData, error: bError } = await _supabase
