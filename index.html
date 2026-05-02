@@ -2355,16 +2355,23 @@
         React.useEffect(() => {
           const loadPromos = async () => {
             try {
-              const snapshot = await loadData(PROMO_STORE).get();
-              const data = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              }));
+              // 1. เปลี่ยนมาใช้ _supabase.from('ชื่อตาราง').select('*')
+              const { data, error } = await _supabase
+                .from('promotions') // หรือใช้ตัวแปร PROMO_STORE ถ้ามันเก็บค่า 'promotions'
+                .select('*');
+
+              if (error) throw error;
+
+              // 2. Supabase คืนค่าเป็น Array (data) มาให้เลย ไม่ต้องใช้ .docs.map
               setPromotions(data || []);
+
             } catch (error) {
-              console.error("Error loading promos:", error);
+              // เปลี่ยน Log ให้ตรงกับฐานข้อมูลที่ใช้จริง
+              console.error("Error loading promos from Supabase:", error.message);
+              setPromotions([]);
             }
           };
+
           loadPromos();
         }, []);
 
