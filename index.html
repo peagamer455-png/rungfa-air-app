@@ -711,7 +711,7 @@
       const [showPopup, setShowPopup] = useState(false);
       const [isImporting, setIsImporting] = React.useState(false);
       const [importProgress, setImportProgress] = React.useState(0);
-      const [popupContent, setPopupContent] = React.useState(null);
+      const [popupContent, setPopupContent] = useState(null);
       // --- Sensitive display (กำไร/ต้นทุน) ---
       const [sensitiveVisible, setSensitiveVisible] = useState(false);
       const SENSITIVE_PASSWORD = '261250'; // <-- เปลี่ยนรหัสตรงนี้ตามต้องการ
