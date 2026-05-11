@@ -770,7 +770,7 @@
         sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
         await _supabase.from('bills').delete().lt('date', sixtyDaysAgo.toISOString());
       };
-      
+
 
       const PasswordConfirmModal = () => {
         useEffect(() => {
