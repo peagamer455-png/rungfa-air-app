@@ -2091,25 +2091,26 @@
           };
 
           try {
-            // 1. บันทึกข้อมูล
-            await putData(PRODUCT_STORE, productToSave, products);
+            const result = await putData(
+              PRODUCT_STORE,
+              productToSave,
+              products,
+              setPopupContent,
+              setShowPopup
+            );
 
-
-            // 3. ปิดโหมดแก้ไข
-            setIsEditing(false);
-
-            // 4. [หัวใจสำคัญ] บังคับให้หน้าปัจจุบันยังคงเป็น 'inventory'
-            // แม้จะโหลดข้อมูลใหม่ แต่เราสั่งล็อกให้มันยังอยู่ที่เดิม
-            setCurrentPage('inventory');
-
-            setPopupContent({
-              title: "สำเร็จ",
-              message: `บันทึกสินค้า "${currentProduct.name}" เรียบร้อยแล้ว`
-            });
-            setShowPopup(true);
+            if (result) { // เช็คด้วยว่าบันทึกสำเร็จจริงไหม (ถ้า Error result จะเป็น null)
+              setIsEditing(false);
+              setCurrentPage('inventory');
+              setPopupContent({
+                title: "สำเร็จ",
+                message: `บันทึกสินค้า "${currentProduct.name}" เรียบร้อยแล้ว`
+              });
+              setShowPopup(true);
+            }
 
           } catch (e) {
-            console.error("Error saving product:", e);
+            console.error("Error in handleSubmit:", e);
           }
         };
 
