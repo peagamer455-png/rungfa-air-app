@@ -469,6 +469,7 @@
       React.useEffect(() => {
         if (typeof loadData === 'function') loadData();
         fetchPromotions();
+        autoCleanupData();
       }, [loadData, fetchPromotions]);
 
       const showAppPopup = (title, message) => {
