@@ -67,7 +67,7 @@
       const maxNumber = Math.max(...existingNumbers);
       return String(maxNumber + 1);
     };
-    const putData = async (storeName, data, allItems = []) => {
+    const putData = async (storeName, data, allItems = [], setPopupContent, setShowPopup) => {
       const dataToSave = { ...data };
 
       // 1. ระบุชื่อตารางให้ตรงกับ Supabase (ใช้ชื่อตัวแปรที่นายมีอยู่มาเช็ค)
