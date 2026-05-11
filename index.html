@@ -69,11 +69,15 @@
     };
     const putData = async (storeName, data, allItems = [], setPopupContent, setShowPopup) => {
       const dataToSave = { ...data };
-
-      // 1. ระบุชื่อตารางให้ตรงกับ Supabase (ใช้ชื่อตัวแปรที่นายมีอยู่มาเช็ค)
       const tableName = (storeName === BILL_STORE) ? 'bills' : 'products';
 
-      // --- ส่วน Logic เดิมของนาย: รันเลขบิล ---
+      // --- แก้ไขจุดที่ 1: จัดการ ID ให้ถูกต้อง ---
+      // ถ้า id เป็นค่าว่าง หรือ null ให้ลบทิ้งไปเลย เพื่อให้ Supabase (Postgres) รัน Auto-increment ให้เอง
+      if (dataToSave.id === "" || dataToSave.id === null || dataToSave.id === undefined) {
+        delete dataToSave.id;
+      }
+
+      // --- Logic เดิมของนาย: รันเลขบิล ---
       if (storeName === BILL_STORE && !dataToSave.id) {
         const numericBills = allItems
           .map(b => parseInt(b.billNumber))
@@ -82,9 +86,10 @@
         dataToSave.billNumber = String(maxBill + 1);
       }
 
-      // --- ส่วน Logic เดิมของนาย: จัดการบาร์โค้ดสินค้า ---
+      // --- Logic เดิมของนาย: จัดการบาร์โค้ด ---
       if (storeName === PRODUCT_STORE) {
         if (!dataToSave.barcode || String(dataToSave.barcode).trim() === "") {
+          // ถ้ามี id (กรณีแก้ไข) ให้ใช้ id เป็นบาร์โค้ด
           if (dataToSave.id) {
             dataToSave.barcode = String(dataToSave.id);
           } else {
@@ -95,30 +100,33 @@
         }
       }
 
-      // --- ล้างค่า undefined/null ให้เป็นค่าเริ่มต้น (กัน Supabase ด่า) ---
+      // --- แก้ไขจุดที่ 2: ล้างค่าแบบระวัง ID ---
       Object.keys(dataToSave).forEach(key => {
-        if (dataToSave[key] === undefined || dataToSave[key] === null) {
+        // ถ้าไม่ใช่ id และค่าเป็น null/undefined ถึงค่อยใส่ค่าเริ่มต้น
+        if (key !== 'id' && (dataToSave[key] === undefined || dataToSave[key] === null)) {
           dataToSave[key] = (key === 'stock' || key === 'price' || key === 'cost') ? 0 : "";
         }
       });
 
       try {
-        // --- ส่วนที่เปลี่ยน: ยิงเข้า Supabase แทน Firebase ---
-        // upsert จะดูที่ Primary Key (id) ถ้ามีอยู่แล้วมันจะ Update ถ้าไม่มีมันจะ Insert ใหม่
         const { data: result, error } = await _supabase
           .from(tableName)
           .upsert(dataToSave)
           .select();
 
         if (error) throw error;
-
-        // คืนค่า ID กลับไปเพื่อให้โค้ดส่วนอื่นของนายทำงานต่อได้ (เหมือน docRef.id เดิม)
         return result[0].id;
 
       } catch (err) {
         console.error("Supabase PutData Error:", err.message);
-        setPopupContent({ title: "❌ บันทึกไม่สำเร็จ", message: "เกิดข้อผิดพลาด: " + err.message });
-        setShowPopup(true);
+
+        // --- แก้ไขจุดที่ 3: เช็คประเภทฟังก์ชันก่อนเรียกใช้ ---
+        if (typeof setPopupContent === 'function') {
+          setPopupContent({ title: "❌ บันทึกไม่สำเร็จ", message: "เกิดข้อผิดพลาด: " + err.message });
+        }
+        if (typeof setShowPopup === 'function') {
+          setShowPopup(true);
+        }
         return null;
       }
     };
