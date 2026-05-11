@@ -734,41 +734,42 @@
       };
 
       const updateSummaries = async (bill) => {
-    try {
-      const billDate = new Date(bill.date);
-      const dateKey = billDate.toISOString().split('T')[0]; 
-      const monthKey = `${String(billDate.getMonth() + 1).padStart(2, '0')}-${billDate.getFullYear()}`;
+        try {
+          const billDate = new Date(bill.date);
+          const dateKey = billDate.toISOString().split('T')[0];
+          const monthKey = `${String(billDate.getMonth() + 1).padStart(2, '0')}-${billDate.getFullYear()}`;
 
-      // 1. อัปเดตรายวัน
-      const { data: dExist } = await _supabase.from('daily_summaries').select('*').eq('date', dateKey).single();
-      await _supabase.from('daily_summaries').upsert({
-        date: dateKey,
-        totalSale: (dExist?.totalSale || 0) + (Number(bill.totalSale) || 0),
-        totalCost: (dExist?.totalCost || 0) + (Number(bill.totalCost) || 0),
-        totalProfit: (dExist?.totalProfit || 0) + (Number(bill.totalProfit) || 0),
-        billCount: (dExist?.billCount || 0) + 1
-      });
+          // 1. อัปเดตรายวัน
+          const { data: dExist } = await _supabase.from('daily_summaries').select('*').eq('date', dateKey).single();
+          await _supabase.from('daily_summaries').upsert({
+            date: dateKey,
+            totalSale: (dExist?.totalSale || 0) + (Number(bill.totalSale) || 0),
+            totalCost: (dExist?.totalCost || 0) + (Number(bill.totalCost) || 0),
+            totalProfit: (dExist?.totalProfit || 0) + (Number(bill.totalProfit) || 0),
+            billCount: (dExist?.billCount || 0) + 1
+          });
 
-      // 2. อัปเดตรายเดือน
-      const { data: mExist } = await _supabase.from('monthly_summaries').select('*').eq('month_key', monthKey).single();
-      await _supabase.from('monthly_summaries').upsert({
-        month_key: monthKey,
-        totalSale: (mExist?.totalSale || 0) + (Number(bill.totalSale) || 0),
-        totalCost: (mExist?.totalCost || 0) + (Number(bill.totalCost) || 0),
-        totalProfit: (mExist?.totalProfit || 0) + (Number(bill.totalProfit) || 0),
-        billCount: (mExist?.billCount || 0) + 1
-      });
-    } catch (err) {
-      console.error("สรุปยอดผิดพลาด:", err.message);
-    }
-  };
+          // 2. อัปเดตรายเดือน
+          const { data: mExist } = await _supabase.from('monthly_summaries').select('*').eq('month_key', monthKey).single();
+          await _supabase.from('monthly_summaries').upsert({
+            month_key: monthKey,
+            totalSale: (mExist?.totalSale || 0) + (Number(bill.totalSale) || 0),
+            totalCost: (mExist?.totalCost || 0) + (Number(bill.totalCost) || 0),
+            totalProfit: (mExist?.totalProfit || 0) + (Number(bill.totalProfit) || 0),
+            billCount: (mExist?.billCount || 0) + 1
+          });
+        } catch (err) {
+          console.error("สรุปยอดผิดพลาด:", err.message);
+        }
+      };
 
-  // --- ฟังก์ชันล้างบิลเก่า (ลบเฉพาะในตาราง bills เพื่อประหยัดพื้นที่) ---
-  const autoCleanupData = async () => {
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-    await _supabase.from('bills').delete().lt('date', sixtyDaysAgo.toISOString());
-  };
+      // --- ฟังก์ชันล้างบิลเก่า (ลบเฉพาะในตาราง bills เพื่อประหยัดพื้นที่) ---
+      const autoCleanupData = async () => {
+        const sixtyDaysAgo = new Date();
+        sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+        await _supabase.from('bills').delete().lt('date', sixtyDaysAgo.toISOString());
+      };
+      
 
       const PasswordConfirmModal = () => {
         useEffect(() => {
@@ -2564,9 +2565,7 @@
           try {
             // --- จุดแก้ไขที่ 1: ส่ง bills (state) เข้าไปเพื่อให้ระบบรันเลข ---
             const savedId = await putData(BILL_STORE, finalBill, bills);
-
-            // ดึงข้อมูลบิลล่าสุดที่เพิ่งเซฟ (เพื่อเอาเลข billNumber ที่ระบบรันให้)
-            // หมายเหตุ: ใน putData ใหม่จะมีการเติม billNumber ลงไปใน object ก่อนเซฟ
+            await updateSummaries(finalBill);
 
             // 1. ตัดสต็อกสินค้า
             for (const item of billItems) {
