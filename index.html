@@ -2090,6 +2090,11 @@
             barcode: finalBarcode || undefined
           };
 
+          // --- เพิ่มตรงนี้: ถ้า id เป็นค่าว่าง ให้ลบทิ้ง เพื่อให้ Supabase สร้าง ID ใหม่ให้เอง ---
+          if (productToSave.id === "" || productToSave.id === null) {
+            delete productToSave.id;
+          }
+
           try {
             const result = await putData(
               PRODUCT_STORE,
