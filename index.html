@@ -939,13 +939,11 @@
       useEffect(() => {
         loadPdfLibs();
 
-        const unsubProducts = loadData(PRODUCT_STORE, (data) => setProducts(data));
-        const unsubBills = loadData(BILL_STORE, (data) => setBills(data));
+        if (typeof loadData === 'function') {
+          loadData(); 
+        }
 
-        return () => {
-          unsubProducts();
-          unsubBills();
-        };
+        return () => {};
       }, []);
 
       // ปิด autocomplete / คำแนะนำของเบราว์เซอร์ สำหรับ form / input / textarea
