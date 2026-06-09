@@ -747,25 +747,60 @@
           const dateKey = billDate.toISOString().split('T')[0];
           const monthKey = `${String(billDate.getMonth() + 1).padStart(2, '0')}-${billDate.getFullYear()}`;
 
-          // 1. อัปเดตรายวัน
-          const { data: dExist } = await _supabase.from('daily_summaries').select('*').eq('date', dateKey).single();
-          await _supabase.from('daily_summaries').upsert({
-            date: dateKey,
-            totalSale: (dExist?.totalSale || 0) + (Number(bill.totalSale) || 0),
-            totalCost: (dExist?.totalCost || 0) + (Number(bill.totalCost) || 0),
-            totalProfit: (dExist?.totalProfit || 0) + (Number(bill.totalProfit) || 0),
-            billCount: (dExist?.billCount || 0) + 1
-          });
+          // --- 1. อัปเดตรายวัน ---
+          // ถอด .single() ออก เปลี่ยนเป็นดึงแบบ Array ปกติเพื่อป้องกัน Error 406 เวลาขึ้นวันใหม่
+          const { data: dData, error: dGetErr } = await _supabase
+            .from('daily_summaries')
+            .select('*')
+            .eq('date', dateKey);
 
-          // 2. อัปเดตรายเดือน
-          const { data: mExist } = await _supabase.from('monthly_summaries').select('*').eq('month_key', monthKey).single();
-          await _supabase.from('monthly_summaries').upsert({
+          if (dGetErr) throw dGetErr;
+          const dExist = dData && dData.length > 0 ? dData[0] : null;
+
+          // ใช้คีย์ตรงตามหน้าจอ Supabase ของนายเป๊ะๆ (totalSale, totalCost, totalProfit, billCount)
+          const dailyPayload = {
+            date: dateKey,
+            totalSale: (Number(dExist?.totalSale) || 0) + (Number(bill.totalSale) || 0),
+            totalCost: (Number(dExist?.totalCost) || 0) + (Number(bill.totalCost) || 0),
+            totalProfit: (Number(dExist?.totalProfit) || 0) + (Number(bill.totalProfit) || 0),
+            billCount: (parseInt(dExist?.billCount) || 0) + 1
+          };
+
+          // ถ้าเจอแถวเดิม ให้ใส่ id เดิมเข้าไปเพื่อบังคับให้มัน Update แถวนั้น
+          if (dExist?.id) {
+            dailyPayload.id = dExist.id;
+          }
+
+          const { error: dErr } = await _supabase.from('daily_summaries').upsert(dailyPayload);
+          if (dErr) throw dErr;
+
+
+          // --- 2. อัปเดตรายเดือน ---
+          const { data: mData, error: mGetErr } = await _supabase
+            .from('monthly_summaries')
+            .select('*')
+            .eq('month_key', monthKey);
+
+          if (mGetErr) throw mGetErr;
+          const mExist = mData && mData.length > 0 ? mData[0] : null;
+
+          const monthlyPayload = {
             month_key: monthKey,
-            totalSale: (mExist?.totalSale || 0) + (Number(bill.totalSale) || 0),
-            totalCost: (mExist?.totalCost || 0) + (Number(bill.totalCost) || 0),
-            totalProfit: (mExist?.totalProfit || 0) + (Number(bill.totalProfit) || 0),
-            billCount: (mExist?.billCount || 0) + 1
-          });
+            totalSale: (Number(mExist?.totalSale) || 0) + (Number(bill.totalSale) || 0),
+            totalCost: (Number(mExist?.totalCost) || 0) + (Number(bill.totalCost) || 0),
+            totalProfit: (Number(mExist?.totalProfit) || 0) + (Number(bill.totalProfit) || 0),
+            billCount: (parseInt(mExist?.billCount) || 0) + 1
+          };
+
+          if (mExist?.id) {
+            monthlyPayload.id = mExist.id;
+          }
+
+          const { error: mErr } = await _supabase.from('monthly_summaries').upsert(monthlyPayload);
+          if (mErr) throw mErr;
+
+          console.log(`📊 บันทึกยอดสรุปร้านเรียบร้อย! วันที่: ${dateKey}`);
+
         } catch (err) {
           console.error("สรุปยอดผิดพลาด:", err.message);
         }
@@ -940,10 +975,10 @@
         loadPdfLibs();
 
         if (typeof loadData === 'function') {
-          loadData(); 
+          loadData();
         }
 
-        return () => {};
+        return () => { };
       }, []);
 
       // ปิด autocomplete / คำแนะนำของเบราว์เซอร์ สำหรับ form / input / textarea
